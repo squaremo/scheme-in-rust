@@ -8,21 +8,20 @@ const PROMPT: &str = "; ";
 
 fn main() {
     // the `mut` means I can _and must_ reassign the value
-    let mut done = false;
     let mut reader = rustyline::Editor::<()>::new();
-    while !done {
+    loop {
         match reader.readline(PROMPT) {
             Ok(line) =>
                 if line.trim() == "(exit)" {
                     println!("Cheerio!");
-                    done = true;
+                    break;
                 } else {
                     println!("{}",line); // println accepts a format string?
                 },
             Err(e) => {
                 use rustyline::error::ReadlineError::*;
                 match e {
-                    Eof | Interrupted => done = true,
+                    Eof | Interrupted => break,
                     _ => println!("Couldn't readline: {}", e)
                 }
             }
