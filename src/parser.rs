@@ -5,9 +5,9 @@ use nom::character::complete::{digit1,one_of};
 use nom::{
     combinator::map,
     multi::many0,
-    character::complete::satisfy,
+    character::complete::{satisfy,char,multispace0},
     branch::alt,
-    sequence::tuple,
+    sequence::{tuple,delimited,preceded},
 };
 
 // I depart from the how-to here (the author abandoned it after this
@@ -47,6 +47,22 @@ fn parse_symbol(i: &str) -> IResult<&str, Atom> {
         })(i)
 }
 
+fn parse_atom(i: &str) -> IResult<&str, Expr> {
+    map(alt((parse_int, parse_symbol)), |atom| { Expr::Atom(atom) })(i)
+}
+
+fn parse_list(i: &str) -> IResult<&str, Expr> {
+    map(delimited(
+        char('('),
+        many0(preceded(multispace0, parse_expr)),
+        preceded(multispace0, char(')'))
+    ), |terms| { Expr::List(terms) })(i)
+}
+
+fn parse_expr(i: &str) -> IResult<&str, Expr> {
+    alt((parse_list, parse_atom))(i)
+}
+
 #[derive(Debug, PartialEq, Clone)] // <-- these expected by the parser combinators
 enum Atom {
     Symbol(String),
@@ -68,4 +84,28 @@ fn atom_parser() {
     // symbols
     assert_eq!(Ok(("", Atom::Symbol(String::from("sym")))), parse_symbol("sym"));
     assert_eq!(Ok(("", Atom::Symbol(String::from("=sym/098765+")))), parse_symbol("=sym/098765+"));
+}
+
+#[test]
+fn list_parser() {
+    assert_eq!(Ok(("", Expr::List(vec![]))), parse_list("()"));
+
+    let sym = Expr::Atom(Atom::Symbol(String::from("sym")));
+    let one = Expr::Atom(Atom::Int(1));
+    let two = Expr::Atom(Atom::Int(2));
+    let three = Expr::Atom(Atom::Int(3));
+    let three1 = three.clone();
+
+    assert_eq!(Ok(("", Expr::List(vec![one, two, three]))), parse_list("(1 2 3)"));
+    assert_eq!(Ok(("", Expr::List(vec![sym, three1]))), parse_list("(sym 3)"));
+}
+
+#[test]
+fn expr_parser() {
+    let sym = Expr::Atom(Atom::Symbol(String::from("sym")));
+    let one = Expr::Atom(Atom::Int(1));
+    let two = Expr::Atom(Atom::Int(2));
+    let three = Expr::Atom(Atom::Int(3));
+    assert_eq!(Ok(("", Expr::List(vec![sym, one, Expr::List(vec![two, three])]))),
+               parse_expr("(sym 1 (2 3))"))
 }
