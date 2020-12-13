@@ -4,13 +4,13 @@
 //     https://doc.rust-lang.org/edition-guide/rust-2018/module-system/path-clarity.html
 use rustyline;
 
-// look in parser.rs
+// look in parser.rs, value.rs
 mod parser;
+mod value;
 
 const PROMPT: &str = "; ";
 
 fn main() {
-    // the `mut` means I can _and must_ reassign the value
     let mut reader = rustyline::Editor::<()>::new();
     loop {
         match reader.readline(PROMPT) {
