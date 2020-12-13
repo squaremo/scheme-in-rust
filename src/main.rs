@@ -1,4 +1,7 @@
-// `extern` is used in the how-to; more modern is to just `use`.
+// `extern` is used in the how-to; more modern is to just use
+// `use`. See
+//
+//     https://doc.rust-lang.org/edition-guide/rust-2018/module-system/path-clarity.html
 use rustyline;
 
 const PROMPT: &str = "; ";
