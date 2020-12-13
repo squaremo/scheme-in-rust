@@ -3,7 +3,7 @@ use nom::{
 };
 use nom::character::complete::{digit1,one_of};
 use nom::{
-    combinator::map,
+    combinator::{map, all_consuming},
     multi::many0,
     character::complete::{satisfy,char,multispace0},
     branch::alt,
@@ -63,15 +63,24 @@ fn parse_expr(i: &str) -> IResult<&str, Expr> {
     alt((parse_list, parse_atom))(i)
 }
 
+// parse a _whole line_ (must consome all the byteses).
+pub fn parse_line(i: &str) -> IResult<&str, Expr> {
+    all_consuming(delimited(
+        multispace0,
+        parse_expr,
+        multispace0
+    ))(i)
+}
+
 #[derive(Debug, PartialEq, Clone)] // <-- these expected by the parser combinators
-enum Atom {
+pub enum Atom {
     Symbol(String),
     Int(i64)
     // more kinds of atom go here: string, float, bool
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum Expr {
+pub enum Expr {
     List(Vec<Expr>),
     Atom(Atom)
     // vector might go here too

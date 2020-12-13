@@ -15,11 +15,9 @@ fn main() {
     loop {
         match reader.readline(PROMPT) {
             Ok(line) =>
-                if line.trim() == "(exit)" {
-                    println!("Cheerio!");
-                    break;
-                } else {
-                    println!("{}",line); // println accepts a format string?
+                match parser::parse_line(&line) {
+                    Ok((_, expr)) => println!("{:#?}", expr),
+                    Err(e) => println!("Error: {}", e)
                 },
             Err(e) => {
                 use rustyline::error::ReadlineError::*;
