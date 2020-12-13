@@ -19,8 +19,7 @@ fn main() {
             Err(e) => {
                 use rustyline::error::ReadlineError::*;
                 match e {
-                    Eof => done = true,
-                    Interrupted => done = true,
+                    Eof | Interrupted => done = true,
                     _ => println!("Couldn't readline: {}", e)
                 }
             }
