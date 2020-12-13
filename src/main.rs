@@ -4,6 +4,9 @@
 //     https://doc.rust-lang.org/edition-guide/rust-2018/module-system/path-clarity.html
 use rustyline;
 
+// look in parser.rs
+mod parser;
+
 const PROMPT: &str = "; ";
 
 fn main() {
