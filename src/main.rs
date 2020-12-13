@@ -10,16 +10,14 @@ fn main() {
     while !done {
         match reader.readline(PROMPT) {
             Ok(line) =>
-                if line == "(exit)" {
+                if line.trim() == "(exit)" {
+                    println!("Cheerio!");
                     done = true;
                 } else {
                     println!("{}",line); // println accepts a format string?
                 },
             Err(rustyline::error::ReadlineError::Eof) => done = true,
-            Err(rustyline::error::ReadlineError::Interrupted) => {
-                println!("Cheerio then");
-                done = true
-            },
+            Err(rustyline::error::ReadlineError::Interrupted) => done = true,
             Err(e) => println!("Couldn't readline: {}", e),
         }
     }
