@@ -16,9 +16,14 @@ fn main() {
                 } else {
                     println!("{}",line); // println accepts a format string?
                 },
-            Err(rustyline::error::ReadlineError::Eof) => done = true,
-            Err(rustyline::error::ReadlineError::Interrupted) => done = true,
-            Err(e) => println!("Couldn't readline: {}", e),
+            Err(e) => {
+                use rustyline::error::ReadlineError::*;
+                match e {
+                    Eof => done = true,
+                    Interrupted => done = true,
+                    _ => println!("Couldn't readline: {}", e)
+                }
+            }
         }
     }
 }
