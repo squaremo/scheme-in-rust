@@ -9,4 +9,4 @@ edition = "2018"
 [dependencies]
 # TODO: port to 7.0.0.
 rustyline = "1.0.0"
-nom = "~2.0.0"
+nom = "~6.0.0"
