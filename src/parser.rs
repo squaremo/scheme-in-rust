@@ -16,11 +16,6 @@ pub enum Expr {
     List(Vec<Expr>),
 }
 
-// I depart from the how-to here (the author abandoned it after this
-// point anyway). It defined `Ops`, `Primitives` and `SepcialForms`;
-// but I'm going to get just the abstract syntax, and distinguish
-// between those things when evaluating.
-
 // See https://www.cs.cmu.edu/Groups/AI/html/r4rs/r4rs_4.html for
 // Scheme (R4RS) grammar. I'm not trying to follow it faithfully here,
 // just borrowing some of the definitions, e.g., for symbols.
@@ -65,7 +60,13 @@ fn parse_list(i: &str) -> IResult<&str, Expr> {
 }
 
 fn parse_expr(i: &str) -> IResult<&str, Expr> {
-    alt((parse_list, parse_atom))(i)
+    alt(( // reader syntax for quote
+        map(preceded(char('\''), alt((parse_list, parse_atom))),
+            |e| Expr::List(vec![Expr::Symbol(String::from("quote")), e])
+        ),
+        // normal ol' expression
+        alt((parse_list, parse_atom)))
+    )(i)
 }
 
 // parse a _whole line_ (must consome all the byteses).

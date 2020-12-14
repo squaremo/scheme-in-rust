@@ -7,7 +7,6 @@ type EvalResult = Result<ValueRef, String>;
 
 pub fn eval(expr: &Expr, env: &Env) -> EvalResult {
     match expr {
-        Expr::Int(i) => Ok(ValueRef::new(Value::Int(*i))),
         Expr::Symbol(s) => {
             if let Some(val) = env.lookup(&s) {
                 Ok(ValueRef::clone(&val))
@@ -16,12 +15,32 @@ pub fn eval(expr: &Expr, env: &Env) -> EvalResult {
             }
         }
         Expr::List(terms) => eval_apply(&terms, env),
+        Expr::Int(i) => Ok(ValueRef::new(Value::Int(*i))), // <= TODO use quote_expr
     }
+}
+
+fn quote_expr(expr: &Expr) -> ValueRef {
+    let v = match expr {
+        Expr::Symbol(s) => Value::Symbol(s.to_string()),
+        Expr::Int(i) => Value::Int(*i),
+        Expr::List(v) => Value::List(v.into_iter().map(quote_expr).collect()),
+    };
+    ValueRef::new(v)
 }
 
 fn eval_apply(terms: &[Expr], env: &Env) -> EvalResult {
     if let Some((head, tail)) = terms.split_first() {
-        // TODO eval the head (needs environments and special forms)
+        // special forms
+        if let Expr::Symbol(s) = head {
+            if s == "quote" {
+                if tail.len() != 1 {
+                    return Err(String::from("invalid syntax (quote)"))
+                }
+                return Ok(quote_expr(&tail[0]))
+            }
+        }
+        // regular application. Other forms, like left-left-lambda,
+        // could be detected here.
         match eval(head, env) {
             Ok(val) => {
                 match val.deref() {
@@ -29,7 +48,7 @@ fn eval_apply(terms: &[Expr], env: &Env) -> EvalResult {
                         let args = eval_args(tail, env)?;
                         apply_func(f, args, env)
                     },
-                    _ => Err(String::from("head evalautes to non-function")),
+                    _ => Err(String::from("head evaluates to non-function")),
                 }
             },
             _ => Err(String::from("could not evaluate head of apply"))
