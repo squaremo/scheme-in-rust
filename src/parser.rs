@@ -10,10 +10,11 @@ use nom::{
     sequence::{tuple,delimited,preceded},
 };
 
+#[derive(Debug,PartialEq,Clone)]
 pub enum Expr {
     Int(i64),
     Symbol(String),
-    List(Vec<Expr>),
+    List(Box<Expr>, Vec<Expr>), // head, tail
 }
 
 // See https://www.cs.cmu.edu/Groups/AI/html/r4rs/r4rs_4.html for
@@ -54,15 +55,18 @@ fn parse_atom(i: &str) -> IResult<&str, Expr> {
 fn parse_list(i: &str) -> IResult<&str, Expr> {
     map(delimited(
         char('('),
-        many0(preceded(multispace0, parse_expr)),
+        tuple((
+            preceded(multispace0, parse_expr),
+            many0(preceded(multispace0, parse_expr)),
+        )),
         preceded(multispace0, char(')'))
-    ), |terms| { Expr::List(terms) })(i)
+    ), |(head, tail)| { Expr::List(Box::new(head), tail) })(i)
 }
 
 fn parse_expr(i: &str) -> IResult<&str, Expr> {
     alt(( // reader syntax for quote
         map(preceded(char('\''), alt((parse_list, parse_atom))),
-            |e| Expr::List(vec![Expr::Symbol(String::from("quote")), e])
+            |e| Expr::List(Box::new(Expr::Symbol(String::from("quote"))), vec![e])
         ),
         // normal ol' expression
         alt((parse_list, parse_atom)))
@@ -89,16 +93,14 @@ fn atom_parser() {
 
 #[test]
 fn list_parser() {
-    assert_eq!(Ok(("", Expr::List(vec![]))), parse_list("()"));
-
     let sym = Expr::Symbol(String::from("sym"));
     let one = Expr::Int(1);
     let two = Expr::Int(2);
     let three = Expr::Int(3);
     let three1 = three.clone();
 
-    assert_eq!(Ok(("", Expr::List(vec![one, two, three]))), parse_list("(1 2 3)"));
-    assert_eq!(Ok(("", Expr::List(vec![sym, three1]))), parse_list("(sym 3)"));
+    assert_eq!(Ok(("", Expr::List(Box::new(one), vec![two, three]))), parse_list("(1 2 3)"));
+    assert_eq!(Ok(("", Expr::List(Box::new(sym), vec![three1]))), parse_list("(sym 3)"));
 }
 
 #[test]
@@ -107,6 +109,6 @@ fn expr_parser() {
     let one = Expr::Int(1);
     let two = Expr::Int(2);
     let three = Expr::Int(3);
-    assert_eq!(Ok(("", value::List(vec![sym, one, Expr::List(vec![two, three])]))),
+    assert_eq!(Ok(("", Expr::List(Box::new(sym), vec![one, Expr::List(Box::new(two), vec![three])]))),
                parse_expr("(sym 1 (2 3))"))
 }
