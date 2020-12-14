@@ -16,7 +16,7 @@ const PROMPT: &str = "; ";
 fn main() {
     let mut reader = rustyline::Editor::<()>::new();
     let mut global = env::Env::top_env();
-    global.set_env("+", value::make_prim(prims::plus));
+    prims::into_env(&mut global);
     loop {
         match reader.readline(PROMPT) {
             Ok(line) =>

@@ -1,4 +1,5 @@
-use crate::value::{ValueRef,Value};
+use crate::value::{ValueRef,Value,make_prim};
+use crate::env::Env;
 
 pub fn plus(args: Vec<ValueRef>) -> Result<Value, String> {
     let mut result: i64 = 0;
@@ -9,4 +10,8 @@ pub fn plus(args: Vec<ValueRef>) -> Result<Value, String> {
         };
     }
     Ok(Value::Int(result))
+}
+
+pub fn into_env(env: &mut Env) {
+    env.set_env("+", make_prim(plus));
 }
