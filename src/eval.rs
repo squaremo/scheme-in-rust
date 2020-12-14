@@ -1,46 +1,50 @@
-use crate::value::Value;
+use crate::value::{Value,Func,ValueRef};
+use crate::parser::Expr;
+use crate::env::Env;
+use std::ops::Deref;
 
-//const LAMBDA: Value = Value::Symbol(String::from("lambda"));
+type EvalResult = Result<ValueRef, String>;
 
-const PLUS: &str = "+";
-
-pub fn eval(expr: Value) -> Result<Value, &'static str> {
+pub fn eval(expr: &Expr, env: &Env) -> EvalResult {
     match expr {
-        Value::Int(_) => Ok(expr),
-        Value::Symbol(_) => Err("environments not implemented yet"),
-        Value::List(terms) => eval_apply(terms),
+        Expr::Int(i) => Ok(ValueRef::new(Value::Int(*i))),
+        Expr::Symbol(s) => {
+            if let Some(val) = env.lookup(&s) {
+                Ok(ValueRef::clone(&val))
+            } else {
+                Err(format!("failed to resolve symbol {}", s))
+            }
+        }
+        Expr::List(terms) => eval_apply(&terms, env),
     }
 }
 
-fn eval_apply(terms: Vec<Value>) -> Result<Value, &'static str> {
+fn eval_apply(terms: &[Expr], env: &Env) -> EvalResult {
     if let Some((head, tail)) = terms.split_first() {
         // TODO eval the head (needs environments and special forms)
-        match head {
-            Value::Symbol(op) =>
-                if op == PLUS {
-                    prim_plus(tail.to_vec())
-                } else {
-                    Err("unknown function")
-                },
-            _ => Err("cannot evaluate head of apply")
+        match eval(head, env) {
+            Ok(val) => {
+                match val.deref() {
+                    Value::Func(f) => {
+                        let args = eval_args(tail, env)?;
+                        apply_func(f, args, env)
+                    },
+                    _ => Err(String::from("head evalautes to non-function")),
+                }
+            },
+            _ => Err(String::from("could not evaluate head of apply"))
         }
     } else {
-        Err("empty form")
+        Err(String::from("empty form"))
     }
 }
 
-fn eval_args(args: Vec<Value>) -> Result<Vec<Value>, &'static str> {
-    args.into_iter().map(eval).collect()
+fn eval_args(args: &[Expr], env: &Env) -> Result<Vec<ValueRef>, String> {
+    args.into_iter().map(|term| { eval(term, env) }).collect()
 }
 
-fn prim_plus(terms: Vec<Value>) -> Result<Value, &'static str> {
-    let mut result: i64 = 0;
-    let args = eval_args(terms)?;
-    for arg in args {
-        match arg {
-            Value::Int(i) => result += i,
-            _ => return Err("attempt to add non-number")
-        };
+fn apply_func(f: &Func, args: Vec<ValueRef>, _env: &Env) -> EvalResult {
+    match f {
+        Func::Prim(prim) => prim(args).map(|val| { ValueRef::new(val) }),
     }
-    Ok(Value::Int(result))
 }

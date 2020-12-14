@@ -8,17 +8,21 @@ use rustyline;
 mod parser;
 mod value;
 mod eval;
+mod env;
+mod prims;
 
 const PROMPT: &str = "; ";
 
 fn main() {
     let mut reader = rustyline::Editor::<()>::new();
+    let mut global = env::Env::top_env();
+    global.set_env("+", value::make_prim(prims::plus));
     loop {
         match reader.readline(PROMPT) {
             Ok(line) =>
                 match parser::parse_line(&line) {
                     Ok((_, expr)) => {
-                        match eval::eval(expr) {
+                        match eval::eval(&expr, &global) {
                             Ok(val) => println!("{:#?}", val),
                             Err(e) => println!("Error: {}", e),
                         }
