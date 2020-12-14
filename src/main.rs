@@ -4,9 +4,10 @@
 //     https://doc.rust-lang.org/edition-guide/rust-2018/module-system/path-clarity.html
 use rustyline;
 
-// look in parser.rs, value.rs
+// look in parser.rs, value.rs, etc.
 mod parser;
 mod value;
+mod eval;
 
 const PROMPT: &str = "; ";
 
@@ -16,7 +17,12 @@ fn main() {
         match reader.readline(PROMPT) {
             Ok(line) =>
                 match parser::parse_line(&line) {
-                    Ok((_, expr)) => println!("{:#?}", expr),
+                    Ok((_, expr)) => {
+                        match eval::eval(expr) {
+                            Ok(val) => println!("{:#?}", val),
+                            Err(e) => println!("Error: {}", e),
+                        }
+                    },
                     Err(e) => println!("Error: {}", e)
                 },
             Err(e) => {
