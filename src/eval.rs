@@ -40,6 +40,10 @@ fn eval_list(head: &Expr, tail: &[Expr], env: &EnvRef) -> EvalResult {
             }
             return Ok(quote_expr(&tail[0]))
         }
+        // (begin body...)
+        if s == "begin" {
+            return eval_begin(tail, env)
+        }
         // (lambda args body...)
         if s == "lambda" {
             if tail.len() < 2 {
