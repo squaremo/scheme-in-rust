@@ -112,3 +112,16 @@ fn expr_parser() {
     assert_eq!(Ok(("", Expr::List(Box::new(sym), vec![one, Expr::List(Box::new(two), vec![three])]))),
                parse_expr("(sym 1 (2 3))"))
 }
+
+#[test]
+fn quote_syntax() {
+    let quote0 = Expr::Symbol(String::from("quote"));
+    let quote1 = Expr::Symbol(String::from("quote"));
+    let sym = Expr::Symbol(String::from("sym"));
+    let bol = Expr::List(Box::new(quote0), vec![Expr::Symbol(String::from("bol"))]);
+    let two = Expr::Int(2);
+    let three = Expr::Int(3);
+    let nums = Expr::List(Box::new(quote1), vec![Expr::List(Box::new(two), vec![three])]);
+    assert_eq!(Ok(("", Expr::List(Box::new(sym), vec![bol, nums]))),
+               parse_expr("(sym 'bol '(2 3))"))
+}
