@@ -9,7 +9,9 @@ pub enum Value {
     Int(i64),
     List(Vec<ValueRef>),
     Func(Func),
-    // more kinds of value go here: string, float, bool
+    True,
+    False,
+    // more kinds of value go here: string, float
 }
 
 // ValueRef is used for values resulting from evaluation (i.e., all of

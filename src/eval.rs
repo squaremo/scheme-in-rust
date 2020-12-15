@@ -15,8 +15,7 @@ pub fn eval(expr: &Expr, env: &EnvRef) -> EvalResult {
             }
         },
         Expr::List(head, tail) => eval_list(&head, &tail, env),
-        Expr::Nil => Ok(ValueRef::new(Value::List(vec![]))),
-        Expr::Int(i) => Ok(ValueRef::new(Value::Int(*i))), // <= TODO use quote_expr
+        _ => Ok(quote_expr(expr)),
     }
 }
 
@@ -26,6 +25,9 @@ fn quote_expr(expr: &Expr) -> ValueRef {
         Expr::Int(i) => Value::Int(*i),
         Expr::List(h, t) => Value::List((vec![h.deref()].into_iter()).chain(t.into_iter()).map(quote_expr).collect()),
         Expr::Nil => Value::List(vec![]),
+        Expr::True => Value::True,
+        Expr::False => Value::False,
+        Expr::Int(i) => Value::Int(*i),
     };
     ValueRef::new(v)
 }
@@ -43,6 +45,18 @@ fn eval_list(head: &Expr, tail: &[Expr], env: &EnvRef) -> EvalResult {
         // (begin body...)
         if s == "begin" {
             return eval_begin(tail, env)
+        }
+        // (if expr then [else])
+        if s == "if" {
+            return match tail.len() {
+                2 => {
+                    eval_if(&tail[0], &tail[1], &Expr::Nil, env)
+                },
+                3 => {
+                    eval_if(&tail[0], &tail[1], &tail[2], env)
+                },
+                _ => Err(String::from("invalid syntax (if <expr> <expr> <expr>?)"))
+            }
         }
         // (lambda args body...)
         if s == "lambda" {
@@ -74,6 +88,16 @@ fn eval_list(head: &Expr, tail: &[Expr], env: &EnvRef) -> EvalResult {
         },
         _ => Err(String::from("could not evaluate head of apply"))
     }
+}
+
+fn eval_if(cond: &Expr, when_true: &Expr, when_false: &Expr, env: &EnvRef) -> EvalResult {
+    eval(cond, env)
+        .and_then(| v | {
+            match *v {
+                Value::False => eval(when_false, env),
+                _ => eval(when_true, env),
+            }
+        })
 }
 
 fn eval_args(args: &[Expr], env: &EnvRef) -> Result<Vec<ValueRef>, String> {

@@ -3,6 +3,7 @@ use nom::{
 };
 use nom::character::complete::{digit1,one_of};
 use nom::{
+    bytes::complete::tag,
     combinator::{map, all_consuming},
     multi::many0,
     character::complete::{satisfy,char,multispace0},
@@ -16,6 +17,8 @@ pub enum Expr {
     Symbol(String),
     List(Box<Expr>, Vec<Expr>), // head, tail
     Nil, // empty list
+    True,
+    False,
 }
 
 // See https://www.cs.cmu.edu/Groups/AI/html/r4rs/r4rs_4.html for
@@ -36,6 +39,11 @@ fn symbol_extended(i: &str) -> IResult<&str, char> {
     one_of(SYMBOL_EXTENDED_CHARS)(i)
 }
 
+fn parse_bool(i: &str) -> IResult<&str, Expr> {
+    alt((map(tag("#t"), |_| { Expr::True }),
+         map(tag("#f"), |_| { Expr::False })))(i)
+}
+
 fn parse_symbol(i: &str) -> IResult<&str, Expr> {
     map(
         tuple((
@@ -50,7 +58,7 @@ fn parse_symbol(i: &str) -> IResult<&str, Expr> {
 }
 
 fn parse_atom(i: &str) -> IResult<&str, Expr> {
-    alt((parse_int, parse_symbol))(i)
+    alt((parse_int, parse_symbol, parse_bool))(i)
 }
 
 fn parse_list(i: &str) -> IResult<&str, Expr> {
