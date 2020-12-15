@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 // Environments are a chain of hashmaps. Why a chain? So that each new
 // lexical environment can shadow variables without disturbing older
@@ -6,8 +7,14 @@ use std::collections::HashMap;
 
 use crate::value::ValueRef;
 
+// Env values end up in closures, and at some point I may want to
+// mutate them; so, I'm going to use reference-counted pointers to
+// them when passing them around.
+pub type EnvRef = Rc<Env>;
+
+#[derive(Debug,PartialEq,Clone)]
 pub struct Env {
-    parent: Option<Box<Env>>,
+    parent: Option<EnvRef>,
     here: HashMap<String, ValueRef>,
 }
 
@@ -20,9 +27,9 @@ impl Env {
         }
     }
 
-    pub fn new_env(parent: Env) -> Env {
+    pub fn new(parent: &EnvRef) -> Env {
         Env{
-            parent: Some(Box::new(parent)),
+            parent: Some(parent.clone()),
             here: HashMap::new(),
         }
     }

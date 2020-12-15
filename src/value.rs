@@ -1,5 +1,8 @@
 use std::rc::Rc;
 
+use crate::parser::Expr;
+use crate::env::{EnvRef};
+
 #[derive(Debug, PartialEq, Clone)] // <-- these expected by the parser combinators
 pub enum Value {
     Symbol(String),
@@ -21,7 +24,8 @@ pub type NativeFunc = fn(Vec<ValueRef>) -> Result<Value, String>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Func {
-    Prim(NativeFunc)
+    Prim(NativeFunc),
+    Lambda(Expr, Vec<Expr>, EnvRef), // vars, body, environment
 }
 
 pub fn make_prim(f: NativeFunc) -> ValueRef {

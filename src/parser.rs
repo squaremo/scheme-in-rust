@@ -15,6 +15,7 @@ pub enum Expr {
     Int(i64),
     Symbol(String),
     List(Box<Expr>, Vec<Expr>), // head, tail
+    Nil, // empty list
 }
 
 // See https://www.cs.cmu.edu/Groups/AI/html/r4rs/r4rs_4.html for

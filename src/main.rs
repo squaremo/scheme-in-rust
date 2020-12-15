@@ -17,12 +17,16 @@ fn main() {
     let mut reader = rustyline::Editor::<()>::new();
     let mut global = env::Env::top_env();
     prims::into_env(&mut global);
+    let globalEnv = env::EnvRef::new(global);
     loop {
         match reader.readline(PROMPT) {
             Ok(line) =>
                 match parser::parse_line(&line) {
                     Ok((_, expr)) => {
-                        match eval::eval(&expr, &global) {
+                         // cloning the env here will increment it,
+                         // then it'll be decremented when dropped at
+                         // the end of the block.
+                        match eval::eval(&expr, &globalEnv) {
                             Ok(val) => println!("{:#?}", val),
                             Err(e) => println!("Error: {}", e),
                         }
