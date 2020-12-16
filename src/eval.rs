@@ -27,7 +27,6 @@ fn quote_expr(expr: &Expr) -> ValueRef {
         Expr::Nil => Value::List(vec![]),
         Expr::True => Value::True,
         Expr::False => Value::False,
-        Expr::Int(i) => Value::Int(*i),
     };
     ValueRef::new(v)
 }
@@ -72,6 +71,19 @@ fn eval_list(head: &Expr, tail: &[Expr], env: &EnvRef) -> EvalResult {
             let body = &tail[1..];
             let func = Func::Lambda(args.clone(), body.to_vec(), env.clone());
             return Ok(ValueRef::new(Value::Func(func)))
+        }
+        // (define name <expr>)
+        if s == "define" {
+            if tail.len() != 2 {
+                return Err(String::from("invalid syntax (define name <expr>)"))
+            }
+            if let Expr::Symbol(name) = &tail[0] {
+                let value = eval(&tail[1], env)?;
+                env.set_env(name, value.clone());
+                return Ok(ValueRef::new(Value::List(vec![])))
+            } else {
+                return Err(String::from("invalid syntax (define name <expr>)"))
+            }
         }
     }
     // regular application. Other forms, like left-left-lambda,
