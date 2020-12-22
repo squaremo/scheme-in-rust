@@ -34,7 +34,9 @@ pub enum Opcode {
     CONSTANT(index),
 
     // A bunch of predefined values, that get their own opcodes. All
-    // of these put the predefined value in the `*val*` register.
+    // of these put the predefined value in the `*val*` register. (NB:
+    // some primitives also get inlined when invoked directly; see
+    // CALL* below).
     PREDEFINED_HASHT,
     PREDEFINED_HASHF,
     PREDEFINED_NIL,
@@ -160,7 +162,8 @@ pub enum Opcode {
     CALL2_EQUAL,
     CALL2_LT,
     CALL2_GT,
-    CALL2_TIMES,
     CALL2_LTE,
     CALL2_GTE,
+    CALL2_TIMES,
+    CALL2_DIVIDE,
 }
