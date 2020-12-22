@@ -12,29 +12,28 @@
 (define *quotations* '())
 
 (define (compile-expr prog)
-  (set! *quotations* '())
-  (let ((code (meaning prog r.init #t)))
-    `(program
-      (constants ,@*quotations*)
-      (code ,@code))))
+  (meaning-toplevel prog))
 
-(define (compile-file file)
-  (let* ((input (open-input-file file))
-         (prog  (read input)))
-    (close-input-port input)
-    (compile-expr prog)))
+(define (compile)
+  (set! *quotations* '())
+  (let loop ((prog '()))
+    (let ((expr (read)))
+      (if (eof-object? expr)
+          `(program
+            (constants ,@*quotations*)
+            (code ,@prog))
+          (loop (append prog (compile-expr expr)))))))
 
 (define (main args)
   (case (length args)
     ((1)
-     (let ((expr (read)))
-       (pretty-print (compile-expr expr))
-       (newline)))
+     (pretty-print (compile))
+     (newline))
     ((2)
-     (pretty-print (compile-file (cadr args)))
+     (pretty-print (with-input-from-file (cadr args) compile))
      (newline))))
 
-;; --------- these are copypasta taken verbatim from
+;; --------- these were originally copypasta from
 ;;
 ;;     https://github.com/squaremo/lisp-in-small-pieces
 ;;
@@ -278,6 +277,25 @@
 
 ;; ------- end frontend
 
+(define (meaning-toplevel e)
+  (cond
+   ((and (pair? e) (equal? 'define (car e)))
+    (meaning-toplevel-definition (cadr e) (cddr e)))
+   (else (meaning e r.init #t))))
+
+(define (meaning-toplevel-definition n e*)
+  (cond
+   ((pair? n) ;; e.g., (define (a b) ...)
+    (let* ((binding (or (global-variable? g.current (car n))
+                        (global-extend! n)))
+           (level (cdr binding)))
+      (GLOBAL-SET! level (meaning-abstraction (cdr n) e* r.init #t) )))
+   (else
+    (let* ((binding (or (global-variable? g.current n)
+                        (global-extend! n)))
+           (level (cdr binding)))
+      (GLOBAL-SET! level (meaning (car e*) r.init #t))))))
+
 ;; ------- Backend
 
 ;; This is abstracted in the frontend; the simplest thing to do is
@@ -315,10 +333,12 @@
 ;; Initial env
 (define r.init '())
 
-(define (g.current-extend! n)
-  (let ((level (length g.current)))
-    (set! g.current (cons (cons n `(global . ,level)) g.current))
-    level))
+;; Extend the top-level environment and return a binding.
+(define (global-extend! n)
+  (let* ((level (length g.current))
+         (binding `(global . ,level)))
+    (set! g.current (cons (cons n binding) g.current))
+    binding))
 
 (define (g.init-extend! n)
   (let ((level (length g.init)))
@@ -333,7 +353,9 @@
 (define (compute-kind r n)
   (or (local-variable? r 0 n)
       (global-variable? g.current n)
-      (global-variable? g.init n)))
+      (global-variable? g.init n)
+      ;; if it's not defined already, speculatively define it as global
+      (global-extend! n)))
 
 ;; Setting up the predefined symbol table is different from the LISP
 ;; in Small Pieces code, because I'm trying to line things up with
@@ -583,6 +605,7 @@
 (define (SET-SHALLOW-ARGUMENT! j) `((set-shallow-argument! ,j)))
 (define (DEEP-ARGUMENT-REF level index) `((deep-argument-ref ,level ,index)))
 (define (SET-DEEP-ARGUMENT! level index) `((set-deep-argument! ,level ,index)))
+(define (CHECKED-GLOBAL-REF index) `((checked-global-ref ,index)))
 (define (SET-GLOBAL! i) `((set-global! ,i)))
 (define (JUMP-FALSE offset) `((jump ,offset)))
 (define (GOTO offset) `((goto ,offset)))
