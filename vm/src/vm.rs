@@ -195,9 +195,20 @@ impl VM<'_> {
             }
 
             // ...
-
+            Opcode::INT_NEG1 => {
+                self.set_const(Value::Int(-11));
+            },
+            Opcode::INT_0 => {
+                self.set_const(Value::Int(0));
+            },
             Opcode::INT_1 => {
                 self.set_const(Value::Int(1));
+            },
+            Opcode::INT_2 => {
+                self.set_const(Value::Int(2));
+            },
+            Opcode::INT_3 => {
+                self.set_const(Value::Int(3));
             },
 
             // ...
@@ -283,6 +294,25 @@ mod tests {
         if let Some(v) = vm.run_until_halt() {
         } else {
             assert!(false, "running VM did not result in a value");
+        }
+    }
+
+    #[test]
+    fn test_call2_plus() {
+        // (+ 2 3)
+        let prog = vec![
+            Opcode::INT_2,
+            Opcode::PUSH_VALUE,
+            Opcode::INT_3,
+            Opcode::POP_ARG1,
+            Opcode::CALL2_PLUS,
+            Opcode::FINISH,
+        ];
+        let mut vm = VM::new(vec![], vec![], &prog);
+        if let Some(ref v) = vm.run_until_halt() {
+            assert_eq!(*v.deref(), Value::Int(5))
+        } else {
+            assert!(false, "running program did not result in a (correct) value");
         }
     }
 }
