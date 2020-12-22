@@ -5,8 +5,8 @@
 ;; defined as globals; the result looks like:
 ;;
 ;; (program
-;;   (quotations (value...))
-;;   (code       (opcode ...))
+;;   (constants value...))
+;;   (code       opcode ...))
 ;; )
 
 (define *quotations* '())
@@ -15,8 +15,8 @@
   (set! *quotations* '())
   (let ((code (meaning prog r.init #t)))
     `(program
-      (quotations ,*quotations*)
-      (code ,code))))
+      (constants ,@*quotations*)
+      (code ,@code))))
 
 (define (compile-file file)
   (let* ((input (open-input-file file))
@@ -579,7 +579,7 @@
 
 ;; These just reduce to instructions.
 
-(define (SHALLOW_ARGUMENT_REF i) `((shallow-argument-ref ,i)))
+(define (SHALLOW-ARGUMENT-REF i) `((shallow-argument-ref ,i)))
 (define (SET-SHALLOW-ARGUMENT! j) `((set-shallow-argument! ,j)))
 (define (DEEP-ARGUMENT-REF level index) `((deep-argument-ref ,level ,index)))
 (define (SET-DEEP-ARGUMENT! level index) `((set-deep-argument! ,level ,index)))

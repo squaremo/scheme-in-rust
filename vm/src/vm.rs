@@ -1,4 +1,6 @@
 use std::rc::Rc;
+use std::ops::Deref;
+
 use crate::instructions;
 use crate::instructions::{Opcode};
 use crate::values::{ValueRef,Value};
@@ -160,6 +162,13 @@ impl VM<'_> {
                     assert!(false, "PUSH_VALUE: val register does not contain a value");
                 }
             },
+            Opcode::POP_ARG1 => {
+                if let Some(StackEntry::value(ref v)) = self.stack.pop() {
+                    self.arg1 = Some(v.clone());
+                } else {
+                    assert!(false, "POP_ARG1: top of stack did not contain value");
+                }
+            },
 
             // ...
 
@@ -167,7 +176,7 @@ impl VM<'_> {
                 if let Some(ValReg::new_frame(ref mut f)) = self.val {
                     assert!(f.args.len() > *i as usize, "POP_FRAME: index out of range for frame");
                     if let Some(StackEntry::value(ref v)) = self.stack.pop() {
-                        let mut args = &mut f.args;
+                        let args = &mut f.args;
                         args[*i as usize] = Some(v.clone());
                     } else {
                         assert!(false, "POP_FRAME: pop from stack was a frame not a value");
@@ -191,6 +200,17 @@ impl VM<'_> {
                 self.set_const(Value::Int(1));
             },
 
+            // ...
+
+            Opcode::CALL2_PLUS => {
+                if let (Some(ValReg::value(ref v1)), Some(ref v2)) = (&self.val, &self.arg1) {
+                    prim_plus(v1, v2).and_then(|v| Ok(self.set_val(v)))
+                        .expect("CALL2_PLUS failed");
+                } else {
+                    assert!(false, "CALL2_PLUS: did not find values in val and arg1");
+                }
+            }
+
             _ => assert!(false, "{:#?} not yet implemented", instr)
         }
     }
@@ -208,6 +228,14 @@ impl VM<'_> {
                 _ => None,
             }
         })
+    }
+}
+
+fn prim_plus(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    if let (Value::Int(a), Value::Int(b)) = (v1.clone().deref(), v2.clone().deref()) {
+        Ok(ValueRef::new(Value::Int(a+b)))
+    } else {
+        Err(format!("operands are not both integers"))
     }
 }
 
