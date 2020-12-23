@@ -55,7 +55,7 @@ pub enum Opcode {
 
     // get the value in the *val* register and set it in the
     // activation frame, slot i.
-    SET_SHALLOW_ARGUMENT(index, index),
+    SET_SHALLOW_ARGUMENT(index),
     // set the value in the *val* register into the activation frame i
     // levels up, slot j.
     SET_DEEP_ARGUMENT(index, index),

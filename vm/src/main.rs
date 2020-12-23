@@ -28,7 +28,7 @@ fn main() {
                 Ok(program) => {
                     let mut code = program.code;
                     code.push(Opcode::FINISH);
-                    let mut vm = VM::new(vec![], program.constants, &code);
+                    let mut vm = VM::new(program.constants, &mut code);
                     let val = vm.run_until_halt();
                                 println!("{:#?}", val);
                 },

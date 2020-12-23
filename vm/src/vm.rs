@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::cell::RefCell;
 use std::ops::Deref;
 
 use crate::instructions;
@@ -13,21 +14,21 @@ type FrameRef = Rc<Frame>;
 
 #[derive(Clone)]
 struct Frame {
-    args: Vec<Option<ValueRef>>,
+    args: Vec<RefCell<Option<ValueRef>>>,
     next: Option<FrameRef>,
 }
 
 impl Frame {
     fn new(size: instructions::index) -> Frame {
         Frame{
-            args: vec![None; size as usize],
+            args: vec![RefCell::new(None); size as usize],
             next: None,
         }
     }
 
     fn extend(next: FrameRef, size: instructions::index) -> Frame {
         Frame{
-            args: vec![None; size as usize],
+            args: vec![RefCell::new(None); size as usize],
             next: Some(next),
         }
     }
@@ -55,7 +56,7 @@ enum ValReg {
 
 pub struct VM<'a> {
     // globals are variables defined in the global scope.
-    globals: Vec<ValueRef>,
+    globals: Vec<Option<ValueRef>>,
     // constants are literals that appeared in the source.
     constants: Vec<ValueRef>,
 
@@ -89,14 +90,14 @@ pub struct VM<'a> {
 
 impl VM<'_> {
 
-    pub fn new(globals: Vec<ValueRef>, constants: Vec<ValueRef>, program: &[instructions::Opcode]) -> VM {
+    pub fn new(constants: Vec<ValueRef>, program: &[instructions::Opcode]) -> VM {
         let top = Frame{
             args: vec![],
             next: None,
         };
 
         VM{
-            globals: globals,
+            globals: vec![None; 1000],
             constants: constants,
             val: None,
             fun: None,
@@ -122,26 +123,89 @@ impl VM<'_> {
     pub fn step(&mut self) {
         assert_ne!(self.pc.len(), 0, "no instruction to run at program counter");
         let instr = &self.pc[0];
-        self.pc = &self.pc[1..];
         match instr {
             Opcode::SHALLOW_ARGUMENT_REF(i) => {
                 assert!(self.env.args.len() >= (*i as usize), "SHALLOW_ARGUMENT_REF: index out of range for frame");
-                if let Some(ref v) = &self.env.args[*i as usize] {
+                 // this needs to be cloned so that self is not borrowed
+                let arg = self.env.args[*i as usize].clone();
+                // this needs to be longer lived than the match expression
+                let arg1 = arg.borrow();
+                if let Some(ref v) = *arg1 {
                     self.set_val(v.clone());
                 } else {
                     assert!(false, "SHALLOW_ARGUMENT_REF: arg in frame is not initialised");
                 }
             },
-            // deep arg ref
+            Opcode::DEEP_ARGUMENT_REF(rank, index) => {
+                let mut left = *rank;
+                let mut env = &self.env;
+                while left > 0 {
+                    left -= 1;
+                    if let Some(ref next) = env.next {
+                        env = next;
+                    } else {
+                        assert!(false, "DEEP_ARGUMENT_REF: rank overflows environment")
+                    }
+                }
+                assert!(env.args.len() > *index as usize, "DEEP_ARGUMENT_REF: index out of range for frame");
+                let arg = env.args[*index as usize].clone();
+                let arg1 = arg.borrow();
+                if let Some(ref v) = *arg1 {
+                    self.set_val(v.clone());
+                } else {
+                    assert!(false, "DEEP_ARGUMENT_REF: arg in frame is uninitialised")
+                }
+            },
             Opcode::GLOBAL_REF(i) => {
-                self.set_val(self.globals[*i as usize].clone())
+                // NB does not check!! (*it'll panic in unwrap ...)
+                self.set_val(self.globals[*i as usize].as_ref().unwrap().clone())
+            },
+            Opcode::CHECKED_GLOBAL_REF(index) => {
+                if let Some(ref v) = self.globals[*index as usize] {
+                    // // patch the instruction with one that doesn't do
+                    // // this check (*it does really).
+                    // self.pc[0] = Opcode::GLOBAL_REF(*index);
+                    self.set_val(v.clone());
+                } else {
+                    assert!(false, "CHECKED_GLOBAL_REF: global is uninitialised");
+                }
+            },
+            Opcode::CONSTANT(index) => {
+                assert!(self.constants.len() > *index as usize, "CONSTANT index out of bounds");
+                self.set_val(self.constants[*index as usize].clone());
             },
 
-            // ...
+            // ... all the predefined values, and generic predefined
 
             Opcode::FINISH => {
                 self.halted = true
             },
+            Opcode::SET_SHALLOW_ARGUMENT(index) => {
+                assert!(self.env.args.len() > *index as usize, "SET_SHALLOW_ARGUMENT: index out of bounds");
+                if let Some(ValReg::value(ref v)) = self.val {
+                    *self.env.args[*index as usize].borrow_mut() = Some(v.clone());
+                } else {
+                    assert!(false, "SET_SHALLOW_ARGUMENT: value register does not have a value");
+                }
+            },
+            Opcode::SET_DEEP_ARGUMENT(rank, index) => {
+                let mut left = *rank;
+                let mut env = &self.env;
+                while left > 0 {
+                    left -= 1;
+                    if let Some(ref next) = env.next {
+                        env = next;
+                    } else {
+                        assert!(false, "SET_DEEP_ARGUMENT: rank overflows environment")
+                    }
+                }
+                assert!(env.args.len() > *index as usize, "SET_DEEP_ARGUMENT: index out of range for frame");
+                if let Some(ValReg::value(ref v)) = self.val {
+                    *env.args[*index as usize].borrow_mut() = Some(v.clone());
+                } else {
+                    assert!(false, "SET_DEEP_ARGUMENT: value register does not have a value");
+                }
+            }
 
             // ...
 
@@ -177,7 +241,7 @@ impl VM<'_> {
                     assert!(f.args.len() > *i as usize, "POP_FRAME: index out of range for frame");
                     if let Some(StackEntry::value(ref v)) = self.stack.pop() {
                         let args = &mut f.args;
-                        args[*i as usize] = Some(v.clone());
+                        *args[*i as usize].borrow_mut() = Some(v.clone());
                     } else {
                         assert!(false, "POP_FRAME: pop from stack was a frame not a value");
                     }
@@ -196,7 +260,7 @@ impl VM<'_> {
 
             // ...
             Opcode::INT_NEG1 => {
-                self.set_const(Value::Int(-11));
+                self.set_const(Value::Int(-1));
             },
             Opcode::INT_0 => {
                 self.set_const(Value::Int(0));
@@ -224,6 +288,7 @@ impl VM<'_> {
 
             _ => assert!(false, "{:#?} not yet implemented", instr)
         }
+        self.pc = &self.pc[1..];
     }
 
     // Run until the program finishes, then return the content of the
@@ -270,9 +335,10 @@ mod tests {
     #[test]
     fn test_global_ref() {
         let one = ValueRef::new(Value::Int(1));
-        let globals = vec![one.clone()];
+        let globals = vec![Some(one.clone())];
         let prog = vec![Opcode::GLOBAL_REF(0), Opcode::FINISH];
-        let mut vm = VM::new(globals, vec![], &prog);
+        let mut vm = VM::new(vec![], &prog);
+        vm.globals = globals;
         assert_eq!(vm.run_until_halt(), Some(one));
     }
 
@@ -290,7 +356,7 @@ mod tests {
             Opcode::FINISH, // halt.
         ];
 
-        let mut vm = VM::new(vec![], vec![], &prog);
+        let mut vm = VM::new(vec![], &prog);
         if let Some(v) = vm.run_until_halt() {
         } else {
             assert!(false, "running VM did not result in a value");
@@ -308,9 +374,76 @@ mod tests {
             Opcode::CALL2_PLUS,
             Opcode::FINISH,
         ];
-        let mut vm = VM::new(vec![], vec![], &prog);
+        let mut vm = VM::new(vec![], &prog);
         if let Some(ref v) = vm.run_until_halt() {
             assert_eq!(*v.deref(), Value::Int(5))
+        } else {
+            assert!(false, "running program did not result in a (correct) value");
+        }
+    }
+
+    #[test]
+    fn test_shallow_set() {
+        // this is artificial and isn't the compilation of a program
+        let prog = vec![
+            // first there has to be an env with something in it
+            Opcode::INT_3,
+            Opcode::PUSH_VALUE,
+            Opcode::ALLOCATE_FRAME(1),
+            Opcode::POP_FRAME(0),
+            Opcode::EXTEND_ENV,
+            // now there's an environment in *env* with a slot that
+            // can be assigned to
+            Opcode::INT_NEG1,
+            Opcode::SET_SHALLOW_ARGUMENT(0),
+            Opcode::INT_0,
+            Opcode::SHALLOW_ARGUMENT_REF(0),
+            Opcode::FINISH,
+        ];
+        let mut vm = VM::new(vec![], &prog);
+        if let Some(ref v) = vm.run_until_halt() {
+            assert_eq!(*v.deref(), Value::Int(-1))
+        } else {
+            assert!(false, "running program did not result in a (correct) value");
+        }
+    }
+
+    #[test]
+    fn test_deep_env() {
+        // this is artificial and isn't the compilation of a program
+        let prog = vec![
+            Opcode::INT_2,
+            Opcode::PUSH_VALUE,
+            Opcode::ALLOCATE_FRAME(1),
+            Opcode::POP_FRAME(0),
+            Opcode::EXTEND_ENV,
+
+            Opcode::INT_1,
+            Opcode::PUSH_VALUE,
+            Opcode::ALLOCATE_FRAME(1),
+            Opcode::POP_FRAME(0),
+            Opcode::EXTEND_ENV,
+
+            Opcode::INT_0,
+            Opcode::PUSH_VALUE,
+            Opcode::ALLOCATE_FRAME(1),
+            Opcode::POP_FRAME(0),
+            Opcode::EXTEND_ENV,
+
+            Opcode::INT_3,
+            Opcode::SET_DEEP_ARGUMENT(2, 0), // originally INT_2
+
+            // Add the numbers from (1, 0) and (2, 0)
+            Opcode::DEEP_ARGUMENT_REF(1, 0), // = INT_1 -> *val*
+            Opcode::PUSH_VALUE, // INT_1 -> stack
+            Opcode::DEEP_ARGUMENT_REF(2, 0), // INT_3 -> *val*
+            Opcode::POP_ARG1, // INT_1 -> *arg1*
+            Opcode::CALL2_PLUS, // *val* + *arg1* -> *val*
+            Opcode::FINISH,
+        ];
+        let mut vm = VM::new(vec![], &prog);
+        if let Some(ref v) = vm.run_until_halt() {
+            assert_eq!(*v.deref(), Value::Int(4))
         } else {
             assert!(false, "running program did not result in a (correct) value");
         }

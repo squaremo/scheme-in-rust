@@ -10,9 +10,11 @@ pub type ValueRef = Rc<Value>;
 // Ints and lists, for now.
 #[derive(Debug,PartialEq)]
 pub enum Value {
+    Symbol(String),
     Int(i64),
     Cons(ValueRef, ValueRef), // allow improper lists
     Nil,
+    Boolean(bool),
     Undefined,
 }
 
