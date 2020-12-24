@@ -3,6 +3,7 @@ mod vm;
 mod values;
 mod read;
 mod translate;
+mod frame;
 
 use std::env;
 use std::fs;

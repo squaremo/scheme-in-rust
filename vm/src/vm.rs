@@ -1,38 +1,9 @@
-use std::rc::Rc;
-use std::cell::RefCell;
 use std::ops::Deref;
 
 use crate::instructions;
 use crate::instructions::{Opcode};
 use crate::values::{ValueRef,Value};
-
-// Activation frames. These represent an environment for a
-// closure. Because closures need their environment to be preserved,
-// frames are kept on the heap; thus, the reference-counted FrameRef.
-
-type FrameRef = Rc<Frame>;
-
-#[derive(Clone)]
-struct Frame {
-    args: Vec<RefCell<Option<ValueRef>>>,
-    next: Option<FrameRef>,
-}
-
-impl Frame {
-    fn new(size: instructions::index) -> Frame {
-        Frame{
-            args: vec![RefCell::new(None); size as usize],
-            next: None,
-        }
-    }
-
-    fn extend(next: FrameRef, size: instructions::index) -> Frame {
-        Frame{
-            args: vec![RefCell::new(None); size as usize],
-            next: Some(next),
-        }
-    }
-}
+use crate::frame::{Frame,FrameRef};
 
 // These things are put on the stack:
 //
@@ -45,6 +16,7 @@ impl Frame {
 enum StackEntry {
     value(ValueRef),
     frame(FrameRef),
+    return_address(usize),
 }
 
 // The value register can have either a value (already allocated), or
@@ -74,10 +46,10 @@ pub struct VM<'a> {
     // The *env* register holds the current activation frame.
     env: FrameRef,
 
-    // The *pc* register holds the next instruction to execute. Here,
-    // this is is a slice, so that the VM can just step through
-    // instructions.
-    pc: &'a[instructions::Opcode],
+    code: &'a[instructions::Opcode],
+    // The *pc* register holds the next instruction to execute. This
+    // is an index into `code`.
+    pc: usize,
 
     // The stack holds values and activation frames of nested
     // invocations, waiting for control to return. Values are pushed
@@ -104,7 +76,8 @@ impl VM<'_> {
             arg1: None,
             arg2: None,
             env: FrameRef::new(top),
-            pc: program,
+            code: program,
+            pc: 0,
             stack: Vec::<StackEntry>::new(),
             halted: true,
         }
@@ -121,8 +94,9 @@ impl VM<'_> {
     }
 
     pub fn step(&mut self) {
-        assert_ne!(self.pc.len(), 0, "no instruction to run at program counter");
-        let instr = &self.pc[0];
+        assert!(self.pc < self.code.len(), "no instruction to run at program counter");
+        let instr = &self.code[self.pc];
+        self.pc += 1;
         match instr {
             Opcode::SHALLOW_ARGUMENT_REF(i) => {
                 assert!(self.env.args.len() >= (*i as usize), "SHALLOW_ARGUMENT_REF: index out of range for frame");
@@ -162,9 +136,11 @@ impl VM<'_> {
             },
             Opcode::CHECKED_GLOBAL_REF(index) => {
                 if let Some(ref v) = self.globals[*index as usize] {
-                    // // patch the instruction with one that doesn't do
-                    // // this check (*it does really).
-                    // self.pc[0] = Opcode::GLOBAL_REF(*index);
+                    // once checked, this instruction can be patched
+                    // to use GLOBAL_REF instead, which doesn't do the
+                    // checking (it does really, by using `unwrap` --
+                    // sshhh). HOWEVER: while I'm using a slice for
+                    // *pc* I can't patch the instruction being run.
                     self.set_val(v.clone());
                 } else {
                     assert!(false, "CHECKED_GLOBAL_REF: global is uninitialised");
@@ -205,10 +181,28 @@ impl VM<'_> {
                 } else {
                     assert!(false, "SET_DEEP_ARGUMENT: value register does not have a value");
                 }
-            }
-
-            // ...
-
+            },
+            Opcode::SET_GLOBAL(index) => {
+                if let Some(ValReg::value(ref v)) = self.val {
+                    self.globals[*index as usize] = Some(v.clone());
+                } else {
+                    assert!(false, "SET_GLOBAL: val register does not contain a value");
+                }
+            },
+            Opcode::GOTO(offset) => {
+                assert!(self.code.len() > self.pc + *offset as usize, "GOTO: offset would jump past end of code");
+                self.pc += *offset as usize;
+            },
+            Opcode::JUMP(offset) => {
+                assert!(self.code.len() > self.pc + *offset as usize, "JUMP: offset would jump past end of code");
+                if let Some(ValReg::value(ref v)) = self.val {
+                    if let Value::Boolean(false) = v.deref() {
+                        self.pc += *offset as usize;
+                    }
+                } else {
+                    assert!(false, "JUMP: val register does not contain a value");
+                }
+            },
             Opcode::EXTEND_ENV => {
                 if let Some(ValReg::new_frame(ref f)) = self.val {
                     self.env = FrameRef::new(f.clone())
@@ -216,9 +210,11 @@ impl VM<'_> {
                     assert!(false, "EXTEND_ENV: val register does not contain a frame");
                 }
             },
-
-            // ...
-
+            Opcode::UNLINK_ENV => {
+                if let Some(next) = &self.env.next {
+                    self.env = next.clone();
+                }
+            },
             Opcode::PUSH_VALUE => {
                 if let Some(ValReg::value(ref v)) = self.val {
                     self.stack.push(StackEntry::value(v.clone()));
@@ -231,6 +227,105 @@ impl VM<'_> {
                     self.arg1 = Some(v.clone());
                 } else {
                     assert!(false, "POP_ARG1: top of stack did not contain value");
+                }
+            },
+            Opcode::POP_2ARG => {
+                if let Some(StackEntry::value(ref v)) = self.stack.pop() {
+                    self.arg1 = Some(v.clone());
+                } else {
+                    assert!(false, "POP_2ARG: top of stack did not contain value");
+                }
+                if let Some(StackEntry::value(ref v)) = self.stack.pop() {
+                    self.arg2 = Some(v.clone());
+                } else {
+                    assert!(false, "POP_2ARG: top of stack did not contain value");
+                }
+            },
+            Opcode::PRESERVE_ENV => {
+                self.stack.push(StackEntry::frame(self.env.clone()));
+            },
+            Opcode::RESTORE_ENV => {
+                if let Some(StackEntry::frame(env)) = self.stack.pop() {
+                    self.env = env.clone();
+                } else {
+                    assert!(false, "RESTORE_ENV: top of stack did not contain an environment")
+                }
+            },
+            Opcode::POP_FUNCTION => {
+                if let Some(StackEntry::value(v)) = self.stack.pop() {
+                    self.fun = Some(v.clone());
+                } else {
+                    assert!(false, "POP_FUNCTION: top of stack did not contain a value")
+                }
+            },
+            Opcode::CREATE_CLOSURE(offset) => {
+                let c = Value::Closure(self.pc + *offset as usize, self.env.clone());
+                self.val = Some(ValReg::value(ValueRef::new(c)));
+            },
+            Opcode::RETURN => {
+                if let Some(StackEntry::return_address(pc)) = self.stack.pop() {
+                    self.pc = pc;
+                } else {
+                    assert!(false, "POP_FUNCTION: top of stack did not contain a return address");
+                }
+            },
+            Opcode::PACK_FRAME(index) => {
+                // in general, for a function application you don't
+                // know the arity of the function -- it could be just
+                // a value you found. So you have to build an
+                // activation record for all the arguments provided,
+                // then let the function itself (if it takes varargs)
+                // cons the extra args into a list.
+                if let Some(ValReg::new_frame(ref f)) = self.val {
+                    let mut i = f.args.len() - 1;
+                    let mut varargs = ValueRef::new(Value::Nil);
+                    while i > *index as usize {
+                        i -= 1;
+                        let arg = f.args[i].borrow();
+                        if let Some(ref v) = *arg {
+                            varargs = ValueRef::new(Value::Cons(v.clone(), varargs.clone()));
+                        } else {
+                            assert!(false, "PACK_FRAME: argument is undefined")
+                        }
+                    }
+                    *f.args[*index as usize].borrow_mut() = Some(varargs);
+                } else {
+                    assert!(false, "PACK_FRAME: val register does not contain a frame");
+                }
+            },
+            Opcode::FUNCTION_INVOKE => { // non-tailcall
+                if let Some(ref funp) = self.fun {
+                    match funp.deref() {
+                        Value::Closure(pc, env) => {
+                            self.stack.push(StackEntry::return_address(self.pc));
+                            // the function will use the frame in *val*, just
+                            // leave it there.
+                            self.pc = *pc;
+                            self.env = env.clone();
+                        },
+                        _ => {
+                            assert!(false, "FUNCTION_INVOKE: value in fun register is not a function");
+                        }
+                    }
+                } else {
+                    assert!(false, "FUNCTION_INVOKE: no value in fun register");
+                }
+            },
+            Opcode::FUNCTION_GOTO => { // tailcall
+                if let Some(ref funp) = self.fun {
+                    match funp.deref() {
+                        Value::Closure(pc, env) => {
+                            // the function will use the frame in *val*, just
+                            // leave it there.
+                            self.pc = *pc;
+                            self.env = env.clone();
+                        },
+                        _ => {
+                            assert!(false, "FUNCTION_GOTO: value in fun register is not a function");
+                        }
+                    }
+                } else {
+                    assert!(false, "FUNCTION_GOTO: no value in fun register");
                 }
             },
 
@@ -274,6 +369,9 @@ impl VM<'_> {
             Opcode::INT_3 => {
                 self.set_const(Value::Int(3));
             },
+            Opcode::INT(i) => {
+                self.set_const(Value::Int(*i as i64));
+            },
 
             // ...
 
@@ -288,13 +386,15 @@ impl VM<'_> {
 
             _ => assert!(false, "{:#?} not yet implemented", instr)
         }
-        self.pc = &self.pc[1..];
     }
 
     // Run until the program finishes, then return the content of the
     // *val* register if it's a value, or None otherwise.
     pub fn run_until_halt(&mut self) -> Option<ValueRef> {
         self.halted = false;
+        // Give any function invoked at the top an address to return
+        // to. This assumes every code snippet ends with `FINISH`.
+        self.stack.push(StackEntry::return_address(self.code.len() - 1));
         while !self.halted {
             self.step()
         }
@@ -448,4 +548,50 @@ mod tests {
             assert!(false, "running program did not result in a (correct) value");
         }
     }
+
+    #[test]
+    fn test_dotted_abstraction() {
+        // this is something like
+        // (define (fn a . b)
+        //   b)
+        //
+        // (fn 1 2 3 4)
+        let prog = vec![
+            Opcode::CREATE_CLOSURE(1),
+            Opcode::GOTO(4),
+            Opcode::PACK_FRAME(1), // cons all args in slot >= 1 into slot 1
+            Opcode::EXTEND_ENV,
+            Opcode::SHALLOW_ARGUMENT_REF(1), // the list just consed
+            Opcode::RETURN,
+            // rather than assigning the closure somewhere, just push
+            // onto stack
+            Opcode::PUSH_VALUE,
+            Opcode::INT_1, Opcode::PUSH_VALUE,
+            Opcode::INT_2, Opcode::PUSH_VALUE,
+            Opcode::INT_3, Opcode::PUSH_VALUE,
+            Opcode::INT(4), Opcode::PUSH_VALUE,
+            Opcode::ALLOCATE_FRAME(5),
+            Opcode::POP_FRAME(3),
+            Opcode::POP_FRAME(2),
+            Opcode::POP_FRAME(1),
+            Opcode::POP_FRAME(0),
+            Opcode::POP_FUNCTION,
+            Opcode::FUNCTION_GOTO,
+            Opcode::FINISH,
+        ];
+        let mut vm = VM::new(vec![], &prog);
+        if let Some(ref v) = vm.run_until_halt() {
+            assert_eq!(*v, mklist(vec![Value::Int(2), Value::Int(3), Value::Int(4)]));
+        } else {
+            assert!(false, "running program did not result in a (correct) value");
+        }
+    }
+}
+
+fn mklist(vals: Vec<Value>) -> ValueRef {
+    let mut list = Value::Nil;
+    for v in vals.into_iter().rev() {
+        list = Value::Cons(ValueRef::new(v), ValueRef::new(list))
+    }
+    ValueRef::new(list)
 }
