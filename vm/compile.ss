@@ -287,7 +287,7 @@
   (cond
    ((pair? n) ;; e.g., (define (a b) ...)
     (let* ((binding (or (global-variable? g.current (car n))
-                        (global-extend! n)))
+                        (global-extend! (car n))))
            (level (cdr binding)))
       (GLOBAL-SET! level (meaning-abstraction (cdr n) e* r.init #t) )))
    (else
