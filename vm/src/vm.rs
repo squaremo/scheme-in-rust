@@ -128,6 +128,7 @@ impl VM<'_> {
         let instr = &self.code[self.pc];
         self.pc += 1;
         match instr {
+            // Getting values from the environment
             Opcode::SHALLOW_ARGUMENT_REF(i) => {
                 assert!(self.env.args.len() >= (*i as usize), "SHALLOW_ARGUMENT_REF: index out of range for frame");
                  // this needs to be cloned so that self is not borrowed
@@ -169,8 +170,7 @@ impl VM<'_> {
                     // once checked, this instruction can be patched
                     // to use GLOBAL_REF instead, which doesn't do the
                     // checking (it does really, by using `unwrap` --
-                    // sshhh). HOWEVER: while I'm using a slice for
-                    // *pc* I can't patch the instruction being run.
+                    // sshhh).
                     self.set_val(v.clone());
                 } else {
                     assert!(false, "CHECKED_GLOBAL_REF: global is uninitialised");
@@ -181,11 +181,14 @@ impl VM<'_> {
                 self.set_val(self.constants[*index as usize].clone());
             },
 
-            // ... all the predefined values, and generic predefined
+            // ... then the predefined values, and generic predefined
 
+            // HALT.
             Opcode::FINISH => {
                 self.halted = true
             },
+
+            // Mutation
             Opcode::SET_SHALLOW_ARGUMENT(index) => {
                 assert!(self.env.args.len() > *index as usize, "SET_SHALLOW_ARGUMENT: index out of bounds");
                 if let Some(ValReg::value(ref v)) = self.val {
@@ -219,6 +222,8 @@ impl VM<'_> {
                     assert!(false, "SET_GLOBAL: val register does not contain a value");
                 }
             },
+
+            // For compiling alternatives and closures
             Opcode::GOTO(offset) => {
                 assert!(self.code.len() > self.pc + *offset as usize, "GOTO: offset would jump past end of code");
                 self.pc += *offset as usize;
@@ -233,6 +238,8 @@ impl VM<'_> {
                     assert!(false, "JUMP: val register does not contain a value");
                 }
             },
+
+            // Function-calling machinery
             Opcode::EXTEND_ENV => {
                 if let Some(ValReg::new_frame(ref f)) = self.val {
                     self.env = FrameRef::new(f.clone())
@@ -418,6 +425,9 @@ impl VM<'_> {
                     assert!(false, "ARITY_GE: value in val register is not a frame");
                 }
             },
+
+            // A general opcode for integers, then some specialised
+            // ones.
             Opcode::INT(i) => {
                 self.set_const(Value::Int(*i as i64));
             },
@@ -436,6 +446,9 @@ impl VM<'_> {
             Opcode::INT_3 => {
                 self.set_const(Value::Int(3));
             },
+
+            // CALL* opcodes: these called commonly-used primitives,
+            // immediately.
             Opcode::CALL0_newline => {
                 self.call0(prim_newline);
             },
