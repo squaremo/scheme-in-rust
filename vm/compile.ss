@@ -552,7 +552,7 @@
   `((,opcode)))
 
 (define (CALL0 opcode)
-  (INVOKE0 opcode))
+  (INVOKE opcode))
 
 (define (CALL1 address m1)
   (append m1 (INVOKE address)))

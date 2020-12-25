@@ -117,7 +117,9 @@ pub enum Opcode {
     // pop a value from the stack, and cons it onto the value in the
     // given slot of the activation frame in the *val* register. This
     // is used to accumulate rest args during application of a
-    // "dotted" procedure.
+    // procedure known to be dotted; e.g.,
+    //
+    //     ((lambda vargs (...)) a b c)
     POP_CONS_FRAME(index),
 
     // allocate an activation frame of the size given

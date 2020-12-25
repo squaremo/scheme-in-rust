@@ -4,6 +4,7 @@ use crate::instructions;
 use crate::instructions::{Opcode};
 use crate::values::{ValueRef,Value};
 use crate::frame::{Frame,FrameRef};
+use crate::read;
 
 // These things are put on the stack:
 //
@@ -91,6 +92,35 @@ impl VM<'_> {
 
     fn set_val(&mut self, v: ValueRef) {
         self.val = Some(ValReg::value(v));
+    }
+
+    fn call0(&mut self, prim: fn() -> Result<ValueRef, String>) {
+        match prim() {
+            Ok(v) => self.set_val(v),
+            Err(e) => assert!(false, e),
+        }
+    }
+
+    fn call1(&mut self, prim: fn(&ValueRef) -> Result<ValueRef, String>) {
+        if let Some(ValReg::value(ref v1)) = &self.val {
+            match prim(v1) {
+                Ok(v) => self.set_val(v),
+                Err(e) => assert!(false, e),
+            }
+        } else {
+            assert!(false, "CALL1: val register does not contain value");
+        }
+    }
+
+    fn call2(&mut self, prim: fn(&ValueRef, &ValueRef) -> Result<ValueRef, String>) {
+        if let (Some(ValReg::value(ref v1)), Some(ref v2)) = (&self.val, &self.arg1) {
+            match prim(v1, v2) {
+                Ok(v) => self.set_val(v),
+                Err(e) => assert!(false, e),
+            }
+        } else {
+            assert!(false, "CALL1: val register does not contain value");
+        }
     }
 
     pub fn step(&mut self) {
@@ -328,9 +358,37 @@ impl VM<'_> {
                     assert!(false, "FUNCTION_GOTO: no value in fun register");
                 }
             },
-
-            // ...
-
+            Opcode::POP_CONS_FRAME(index) => {
+                if let Some(StackEntry::value(ref v)) = self.stack.pop() {
+                    if let Some(ValReg::new_frame(ref f)) = self.val {
+                        let mut arg = f.args[*index as usize].borrow_mut();
+                        if let Some(ref vargs) = *arg {
+                            // it's supposed to be a list; whatever it is, cons to it
+                            let cons = Value::Cons(v.clone(), vargs.clone());
+                            *arg = Some(ValueRef::new(cons));
+                        } else {
+                            assert!(false, "POP_CONS_ARGUMENT: argument is not a list");
+                        }
+                    } else {
+                        assert!(false, "POP_CONS_ARGUMENT: val register does not contain a frame");
+                    }
+                } else {
+                    assert!(false, "POP_CONS_ARGUMENT: top of stack is not a value");
+                }
+            },
+            Opcode::ALLOCATE_FRAME(i) => {
+                self.val = Some(ValReg::new_frame(
+                    Frame::extend(self.env.clone(), *i),
+                ));
+            },
+            Opcode::ALLOCATE_DOTTED_FRAME(i) => {
+                let newf = Frame::extend(self.env.clone(), *i);
+                {
+                    let mut restarg = newf.args[*i as usize - 1].borrow_mut();
+                    *restarg = Some(ValueRef::new(Value::Nil));
+                }
+                self.val = Some(ValReg::new_frame(newf));
+            },
             Opcode::POP_FRAME(i) => {
                 if let Some(ValReg::new_frame(ref mut f)) = self.val {
                     assert!(f.args.len() > *i as usize, "POP_FRAME: index out of range for frame");
@@ -343,17 +401,26 @@ impl VM<'_> {
                 } else {
                     assert!(false, "POP_FRAME: val register does not contain a frame");
                 }
-            }
-
-            // ...
-
-            Opcode::ALLOCATE_FRAME(i) => {
-                self.val = Some(ValReg::new_frame(
-                    Frame::extend(self.env.clone(), *i),
-                ));
-            }
-
-            // ...
+            },
+            Opcode::ARITY_EQUAL(index) => {
+                if let Some(ValReg::new_frame(ref f)) = self.val {
+                    // should really be an error result here (and elsewhere)
+                    assert_eq!(f.args.len(), *index as usize, "ARITY_EQUAL: number of arguments does not match arity of function");
+                } else {
+                    assert!(false, "ARITY_EQUAL: value in val register is not a frame");
+                }
+            },
+            Opcode::ARITY_GE(index) => {
+                if let Some(ValReg::new_frame(ref f)) = self.val {
+                    // should really be an error result here (and elsewhere)
+                    assert!(f.args.len() >= *index as usize, "ARITY_GE: number of arguments too few for function");
+                } else {
+                    assert!(false, "ARITY_GE: value in val register is not a frame");
+                }
+            },
+            Opcode::INT(i) => {
+                self.set_const(Value::Int(*i as i64));
+            },
             Opcode::INT_NEG1 => {
                 self.set_const(Value::Int(-1));
             },
@@ -369,20 +436,55 @@ impl VM<'_> {
             Opcode::INT_3 => {
                 self.set_const(Value::Int(3));
             },
-            Opcode::INT(i) => {
-                self.set_const(Value::Int(*i as i64));
+            Opcode::CALL0_newline => {
+                self.call0(prim_newline);
             },
-
-            // ...
-
+            // TODO: read
+            Opcode::CALL1_car => {
+                self.call1(prim_car);
+            },
+            Opcode::CALL1_cdr => {
+                self.call1(prim_cdr);
+            },
+            Opcode::CALL1_pair_p => {
+                self.call1(prim_pair_p);
+            },
+            Opcode::CALL1_symbol_p => {
+                self.call1(prim_symbol_p);
+            },
+            Opcode::CALL2_cons => {
+                self.call2(prim_cons);
+            },
+            Opcode::CALL2_eq_p => {
+                self.call2(prim_eq_p);
+            },
             Opcode::CALL2_PLUS => {
-                if let (Some(ValReg::value(ref v1)), Some(ref v2)) = (&self.val, &self.arg1) {
-                    prim_plus(v1, v2).and_then(|v| Ok(self.set_val(v)))
-                        .expect("CALL2_PLUS failed");
-                } else {
-                    assert!(false, "CALL2_PLUS: did not find values in val and arg1");
-                }
-            }
+                self.call2(prim_plus);
+            },
+            Opcode::CALL2_MINUS => {
+                self.call2(prim_minus);
+            },
+            Opcode::CALL2_EQUAL => {
+                self.call2(prim_equal);
+            },
+            Opcode::CALL2_LT => {
+                self.call2(prim_lt);
+            },
+            Opcode::CALL2_GT => {
+                self.call2(prim_gt);
+            },
+            Opcode::CALL2_LTE => {
+                self.call2(prim_lte);
+            },
+            Opcode::CALL2_GTE => {
+                self.call2(prim_gte);
+            },
+            Opcode::CALL2_TIMES => {
+                self.call2(prim_times);
+            },
+            Opcode::CALL2_DIVIDE => {
+                self.call2(prim_divide);
+            },
 
             _ => assert!(false, "{:#?} not yet implemented", instr)
         }
@@ -407,36 +509,135 @@ impl VM<'_> {
     }
 }
 
-fn prim_plus(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
-    if let (Value::Int(a), Value::Int(b)) = (v1.clone().deref(), v2.clone().deref()) {
-        Ok(ValueRef::new(Value::Int(a+b)))
+fn prim_newline() -> Result<ValueRef, String> {
+    println!();
+    Ok(ValueRef::new(Value::Undefined))
+}
+
+fn prim_car(v: &ValueRef) -> Result<ValueRef, String> {
+    if let Value::Cons(ref head, _) = v.deref() {
+        Ok(head.clone())
+    } else {
+        Err("value is not a cons".to_string())
+    }
+}
+
+fn prim_cdr(v: &ValueRef) -> Result<ValueRef, String> {
+    if let Value::Cons(_, ref tail) = v.deref() {
+        Ok(tail.clone())
+    } else {
+        Err("value is not a cons".to_string())
+    }
+}
+
+fn prim_pair_p(v: &ValueRef) -> Result<ValueRef, String> {
+    if let Value::Cons(_, _) = v.deref() {
+        Ok(ValueRef::new(Value::Boolean(true)))
+    } else {
+        Ok(ValueRef::new(Value::Boolean(false)))
+    }
+}
+
+fn prim_symbol_p(v: &ValueRef) -> Result<ValueRef, String> {
+    if let Value::Symbol(_) = v.deref() {
+        Ok(ValueRef::new(Value::Boolean(true)))
+    } else {
+        Ok(ValueRef::new(Value::Boolean(false)))
+    }
+}
+
+fn prim_cons(hd: &ValueRef, tl: &ValueRef) -> Result<ValueRef, String> {
+    Ok(ValueRef::new(Value::Cons(hd.clone(), tl.clone())))
+}
+
+fn prim_eq_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    // eq? is pointer equality
+    if ValueRef::as_ptr(v1) == ValueRef::as_ptr(v2) {
+        Ok(ValueRef::new(Value::Boolean(true)))
+    } else {
+        Ok(ValueRef::new(Value::Boolean(false)))
+    }
+}
+
+fn arith(op: &Fn (i64, i64) -> i64, v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    if let (Value::Int(a), Value::Int(b)) = (v1.deref(), v2.deref()) {
+        Ok(ValueRef::new(Value::Int(op(*a, *b))))
     } else {
         Err(format!("operands are not both integers"))
     }
 }
 
+fn prim_plus(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    arith(&|a, b| a+b, v1, v2)
+}
+
+fn prim_minus(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    arith(&|a, b| a-b, v1, v2)
+}
+
+fn prim_times(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    arith(&|a, b| a*b, v1, v2)
+}
+
+fn prim_divide(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    arith(&|a, b| a/b, v1, v2)
+}
+
+fn compare(cmp: &Fn (i64, i64) -> bool, v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    if let (Value::Int(a), Value::Int(b)) = (v1.deref(), v2.deref()) {
+        Ok(ValueRef::new(Value::Boolean(cmp(*a, *b))))
+    } else {
+        Err(format!("operands are not both integers"))
+    }
+}
+
+fn prim_equal(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    // `=`, not `equal?`
+    compare(&|a,b| a==b, v1, v2)
+}
+
+fn prim_lt(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    // `=`, not `equal?`
+    compare(&|a,b| a<b, v1, v2)
+}
+
+fn prim_gt(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    compare(&|a,b| a>b, v1, v2)
+}
+
+fn prim_lte(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    // `=`, not `equal?`
+    compare(&|a,b| a<=b, v1, v2)
+}
+
+fn prim_gte(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    // `=`, not `equal?`
+    compare(&|a,b| a>=b, v1, v2)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // It's very useful to have a "compiler" on hand to generate some
-    // of these. I use my code from
-    // https://github.com/squaremo/lisp-in-small-pieces, with SISC, like so:
+    // compiler.ss is useful for generating these; either
     //
-    //     $ sisc
-    //     #;> (load "../lisp-in-small-pieces/chapter7.4.ss")
-    //     #;> (disassemble (meaning '((lambda (v)) 1) r.init #t))
+    //     ./compiler.ss file.ss
     //
-    // The latter two arguments to `meaning` are the lexical
-    // environment, and whether it's a tail call. For the snippets
-    // used in testing, these can be `r.init` (an empty lexical
-    // environment) and `#t` (yes, in tail call position).
+    // or
+    //
+    //     ./compiler.ss <<EOF
+    //     ((lambda vargs vargs) 1 2 3)
+    //     EOF
 
     #[test]
     fn test_global_ref() {
         let one = ValueRef::new(Value::Int(1));
         let globals = vec![Some(one.clone())];
-        let prog = vec![Opcode::GLOBAL_REF(0), Opcode::FINISH];
+        let prog = vec![
+            Opcode::GLOBAL_REF(0),
+            Opcode::FINISH
+        ];
         let mut vm = VM::new(vec![], &prog);
         vm.globals = globals;
         assert_eq!(vm.run_until_halt(), Some(one));
@@ -586,12 +787,36 @@ mod tests {
             assert!(false, "running program did not result in a (correct) value");
         }
     }
-}
 
-fn mklist(vals: Vec<Value>) -> ValueRef {
-    let mut list = Value::Nil;
-    for v in vals.into_iter().rev() {
-        list = Value::Cons(ValueRef::new(v), ValueRef::new(list))
+    #[test]
+    fn test_pop_cons() {
+        // ((lambda vargs vargs) 1 2 3)
+        let prog = vec![
+            Opcode::INT_1, Opcode::PUSH_VALUE,
+            Opcode::INT_2, Opcode::PUSH_VALUE,
+            Opcode::INT_3, Opcode::PUSH_VALUE,
+            Opcode::ALLOCATE_DOTTED_FRAME(1),
+            Opcode::POP_CONS_FRAME(0),
+            Opcode::POP_CONS_FRAME(0),
+            Opcode::POP_CONS_FRAME(0),
+            Opcode::EXTEND_ENV,
+            Opcode::SHALLOW_ARGUMENT_REF(0),
+            Opcode::FINISH,
+        ];
+        let mut vm = VM::new(vec![], &prog);
+        if let Some(ref v) = vm.run_until_halt() {
+            assert_eq!(*v, mklist(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+        } else {
+            assert!(false, "running program did not result in a (correct) value");
+        }
     }
-    ValueRef::new(list)
+
+
+    fn mklist(vals: Vec<Value>) -> ValueRef {
+        let mut list = Value::Nil;
+        for v in vals.into_iter().rev() {
+            list = Value::Cons(ValueRef::new(v), ValueRef::new(list))
+        }
+        ValueRef::new(list)
+    }
 }
