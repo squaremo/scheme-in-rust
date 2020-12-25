@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use crate::instructions;
 use crate::instructions::{Opcode};
-use crate::values::{ValueRef,Value};
+use crate::values::{ValueRef,Value,Primitive0,Primitive1,Primitive2};
 use crate::frame::{Frame,FrameRef};
 use crate::read;
 
@@ -13,7 +13,7 @@ use crate::read;
 //
 // Both of these are allocated on the heap, so we get a
 // reference-counted pointer to them.
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 enum StackEntry {
     value(ValueRef),
     frame(FrameRef),
@@ -22,6 +22,7 @@ enum StackEntry {
 
 // The value register can have either a value (already allocated), or
 // a frame under construction.
+#[derive(Debug)]
 enum ValReg {
     value(ValueRef),
     new_frame(Frame),
@@ -30,8 +31,13 @@ enum ValReg {
 pub struct VM<'a> {
     // globals are variables defined in the global scope.
     globals: Vec<Option<ValueRef>>,
-    // constants are literals that appeared in the source.
+    // constants are literals that appeared in the source, i.e., they
+    // are supplied along with the code.
     constants: Vec<ValueRef>,
+    // predefined values are common values that usually have dedicated
+    // opcodes. The indices must line up with what the compiler
+    // expects.
+    predefined: Vec<ValueRef>,
 
     // The *val* register serves as the resting point for any value
     // that's just been calculated, or an activation frame under
@@ -61,6 +67,34 @@ pub struct VM<'a> {
     halted: bool,
 }
 
+fn make_predefined() -> Vec<ValueRef> {
+    vec![
+        // these first few also have dedicated opcodes
+        Value::Boolean(true),  // HASHT
+        Value::Boolean(false), // HASHF
+        Value::Nil,
+        Value::Prim2(Primitive2{name: "cons", func: prim_cons}),
+        Value::Prim1(Primitive1{name: "car", func: prim_car}),
+        Value::Prim1(Primitive1{name: "cdr", func: prim_cdr}),
+        Value::Prim1(Primitive1{name: "pair?", func: prim_pair_p}),
+        Value::Prim1(Primitive1{name: "symbol?", func: prim_symbol_p}),
+        Value::Prim2(Primitive2{name: "eq?", func: prim_eq_p}),
+        // these are referred to only by index, e.g., PREDEFINED(12)
+        Value::Prim0(Primitive0{name: "read", func: prim_read}),
+        Value::Prim0(Primitive0{name: "newline", func: prim_newline}),
+        Value::Prim1(Primitive1{name: "display", func: prim_display}),
+        Value::Prim2(Primitive2{name: "+", func: prim_plus}),
+        Value::Prim2(Primitive2{name: "-", func: prim_minus}),
+        Value::Prim2(Primitive2{name: "=", func: prim_equal}),
+        Value::Prim2(Primitive2{name: "<", func: prim_lt}),
+        Value::Prim2(Primitive2{name: ">", func: prim_gt}),
+        Value::Prim2(Primitive2{name: "<=", func: prim_lte}),
+        Value::Prim2(Primitive2{name: ">=", func: prim_gte}),
+        Value::Prim2(Primitive2{name: "*", func: prim_times}),
+        Value::Prim2(Primitive2{name: "/", func: prim_divide}),
+    ].into_iter().map(ValueRef::new).collect()
+}
+
 impl VM<'_> {
 
     pub fn new(constants: Vec<ValueRef>, program: &[instructions::Opcode]) -> VM {
@@ -72,6 +106,7 @@ impl VM<'_> {
         VM{
             globals: vec![None; 1000],
             constants: constants,
+            predefined: make_predefined(),
             val: None,
             fun: None,
             arg1: None,
@@ -119,7 +154,56 @@ impl VM<'_> {
                 Err(e) => assert!(false, e),
             }
         } else {
-            assert!(false, "CALL1: val register does not contain value");
+            assert!(false, "CALL2: val or arg1 register does not contain value");
+        }
+    }
+
+    // like call1, but gets arguments from the frame in *val*.
+    fn invoke1(&mut self, prim: fn(&ValueRef) -> Result<ValueRef, String>) {
+        let result =
+            if let Some(ValReg::new_frame(ref frame)) = self.val {
+                assert!(frame.args.len() == 2, "INVOKE1: frame does not have expected number of arguments");
+                let arg1 = frame.args[0].borrow();
+                if let Some(ref v1) = *arg1 {
+                    prim(v1)
+                } else {
+                    Err(String::from("INVOKE1: argument is not initialised"))
+                }
+            } else {
+                Err(String::from("INVOKE1: value in val register is not a frame"))
+            };
+        match result {
+            Ok(result) => self.set_val(result),
+            Err(e) => assert!(false, "INVOKE1: primitive returned error")
+        };
+    }
+
+    // like call2, but gets arguments from the frame in *val*
+    fn invoke2(&mut self, prim: fn(&ValueRef, &ValueRef) -> Result<ValueRef, String>) {
+        let result =
+            if let Some(ValReg::new_frame(ref frame)) = self.val {
+                assert!(frame.args.len() == 3, "INVOKE2: frame does not have expected number of arguments");
+                let arg1 = frame.args[0].borrow();
+                let arg2 = frame.args[1].borrow();
+                if let (Some(ref v1), Some(ref v2)) = (&*arg1, &*arg2) {
+                    prim(v1, v2)
+                } else {
+                    Err(String::from("INVOKE2: an argument is not initialised"))
+                }
+            } else {
+                Err(String::from("INVOKE2: value in val register is not a frame"))
+            };
+        match result {
+            Ok(result) => self.set_val(result),
+            Err(e) => assert!(false, "INVOKE2: primitive returned error")
+        };
+    }
+
+    fn doreturn(&mut self) {
+        if let Some(StackEntry::return_address(pc)) = self.stack.pop() {
+            self.pc = pc;
+        } else {
+            assert!(false, "RETURN: top of stack did not contain a return address");
         }
     }
 
@@ -181,7 +265,19 @@ impl VM<'_> {
                 self.set_val(self.constants[*index as usize].clone());
             },
 
-            // ... then the predefined values, and generic predefined
+            // Predefined values
+            Opcode::PREDEFINED_HASHT     => self.set_val(ValueRef::clone(&self.predefined[0])),
+            Opcode::PREDEFINED_HASHF     => self.set_val(ValueRef::clone(&self.predefined[1])),
+            Opcode::PREDEFINED_NIL       => self.set_val(ValueRef::clone(&self.predefined[2])),
+            Opcode::PREDEFINED_CONS      => self.set_val(ValueRef::clone(&self.predefined[3])),
+            Opcode::PREDEFINED_CAR       => self.set_val(ValueRef::clone(&self.predefined[4])),
+            Opcode::PREDEFINED_CDR       => self.set_val(ValueRef::clone(&self.predefined[5])),
+            Opcode::PREDEFINED_PAIR_P    => self.set_val(ValueRef::clone(&self.predefined[6])),
+            Opcode::PREDEFINED_SYMBOL_P  => self.set_val(ValueRef::clone(&self.predefined[7])),
+            Opcode::PREDEFINED_EQ        => self.set_val(ValueRef::clone(&self.predefined[8])),
+            Opcode::PREDEFINED(i) => {
+                self.set_val(ValueRef::clone(&self.predefined[*i as usize]));
+            },
 
             // HALT.
             Opcode::FINISH => {
@@ -282,9 +378,11 @@ impl VM<'_> {
                 self.stack.push(StackEntry::frame(self.env.clone()));
             },
             Opcode::RESTORE_ENV => {
-                if let Some(StackEntry::frame(env)) = self.stack.pop() {
+                let top = self.stack.pop();
+                if let Some(StackEntry::frame(env)) = top {
                     self.env = env.clone();
                 } else {
+                    println!("{:?}", top);
                     assert!(false, "RESTORE_ENV: top of stack did not contain an environment")
                 }
             },
@@ -300,11 +398,7 @@ impl VM<'_> {
                 self.val = Some(ValReg::value(ValueRef::new(c)));
             },
             Opcode::RETURN => {
-                if let Some(StackEntry::return_address(pc)) = self.stack.pop() {
-                    self.pc = pc;
-                } else {
-                    assert!(false, "POP_FUNCTION: top of stack did not contain a return address");
-                }
+                self.doreturn();
             },
             Opcode::PACK_FRAME(index) => {
                 // in general, for a function application you don't
@@ -340,6 +434,14 @@ impl VM<'_> {
                             self.pc = *pc;
                             self.env = env.clone();
                         },
+                        Value::Prim1(Primitive1{name: _, func: f}) => {
+                            self.stack.push(StackEntry::return_address(self.pc));
+                            self.invoke1(*f);
+                        },
+                        Value::Prim2(Primitive2{name: _, func: f}) => {
+                            self.stack.push(StackEntry::return_address(self.pc));
+                            self.invoke2(*f);
+                        },
                         _ => {
                             assert!(false, "FUNCTION_INVOKE: value in fun register is not a function");
                         }
@@ -347,6 +449,7 @@ impl VM<'_> {
                 } else {
                     assert!(false, "FUNCTION_INVOKE: no value in fun register");
                 }
+                self.doreturn();
             },
             Opcode::FUNCTION_GOTO => { // tailcall
                 if let Some(ref funp) = self.fun {
@@ -356,6 +459,12 @@ impl VM<'_> {
                             // leave it there.
                             self.pc = *pc;
                             self.env = env.clone();
+                        },
+                        Value::Prim1(Primitive1{name: _, func: f}) => {
+                            self.invoke1(*f);
+                        },
+                        Value::Prim2(Primitive2{name: _, func: f}) => {
+                            self.invoke2(*f);
                         },
                         _ => {
                             assert!(false, "FUNCTION_GOTO: value in fun register is not a function");
@@ -628,6 +737,13 @@ fn prim_gte(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     compare(&|a,b| a>=b, v1, v2)
 }
 
+fn prim_read() -> Result<ValueRef, String> {
+    Err(String::from("not implemented"))
+}
+
+fn prim_display(v1: &ValueRef) -> Result<ValueRef, String> {
+    Err(String::from("not implemented"))
+}
 
 #[cfg(test)]
 mod tests {
@@ -824,6 +940,69 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_predefined() {
+        // just lump the predefined values into a list:
+        // ((lambda vargs vargs) #t #f '())
+        let prog = vec![
+            Opcode::PREDEFINED_HASHT, Opcode::PUSH_VALUE,
+            Opcode::PREDEFINED_HASHF, Opcode::PUSH_VALUE,
+            Opcode::PREDEFINED_NIL, Opcode::PUSH_VALUE,
+            Opcode::ALLOCATE_DOTTED_FRAME(1),
+            Opcode::POP_CONS_FRAME(0),
+            Opcode::POP_CONS_FRAME(0),
+            Opcode::POP_CONS_FRAME(0),
+            Opcode::EXTEND_ENV,
+            Opcode::SHALLOW_ARGUMENT_REF(0),
+            Opcode::FINISH,
+        ];
+        let mut vm = VM::new(vec![], &prog);
+        if let Some(ref v) = vm.run_until_halt() {
+            assert_eq!(*v, mklist(vec![Value::Boolean(true), Value::Boolean(false), Value::Nil]));
+        } else {
+            assert!(false, "running program did not result in a (correct) value");
+        }
+    }
+
+    #[test]
+    fn test_invoke_1_2() {
+        // Putting in a let-form makes the compiler unable to use
+        // call*, so I can test function-invoke and function-goto.
+        // This is
+        //     ((lambda (cons cdr) (cons 0 (cdr '(1 2 3)))) cons cdr)
+        let consts = vec![mklist(vec![Value::Int(1), Value::Int(2), Value::Int(3)])];
+        let prog = vec![
+            Opcode::PREDEFINED_CONS, Opcode::PUSH_VALUE, // ) the args to the lambda
+            Opcode::PREDEFINED_CDR, Opcode::PUSH_VALUE,  // )
+            Opcode::ALLOCATE_FRAME(3), // ) put them in the frame ...
+            Opcode::POP_FRAME(1),      // )
+            Opcode::POP_FRAME(0),      // )
+            Opcode::EXTEND_ENV,        // enter the lambda body
+            Opcode::SHALLOW_ARGUMENT_REF(0), Opcode::PUSH_VALUE, // eval head of (cons 0 ...)
+            Opcode::INT_0, Opcode::PUSH_VALUE, // eval arg0 of (cons 0 ...)
+            Opcode::SHALLOW_ARGUMENT_REF(1), Opcode::PUSH_VALUE, // push cdr
+            Opcode::CONSTANT(0), Opcode::PUSH_VALUE, // start eval (cdr '(1 2 3))
+            Opcode::ALLOCATE_FRAME(2), // ) put '(1 2 3) in frame
+            Opcode::POP_FRAME(0),      // )
+            Opcode::POP_FUNCTION, // cdr -> *fun*
+            Opcode::PRESERVE_ENV, // not a tail call; put the environment on the stack
+            Opcode::FUNCTION_INVOKE, // call *fun* with the frame in *val*
+            Opcode::RESTORE_ENV, // restore the env
+            Opcode::PUSH_VALUE, // result from cdr to stack
+            Opcode::ALLOCATE_FRAME(3), // ) put args for cons into frame
+            Opcode::POP_FRAME(1),      // )
+            Opcode::POP_FRAME(0),      // )
+            Opcode::POP_FUNCTION,
+            Opcode::FUNCTION_GOTO, // tail-call cons
+            Opcode::FINISH,
+        ];
+        let mut vm = VM::new(consts, &prog);
+        if let Some(ref v) = vm.run_until_halt() {
+            assert_eq!(*v, mklist(vec![Value::Int(0), Value::Int(2), Value::Int(3)]));
+        } else {
+            assert!(false, "running program did not result in a (correct) value");
+        }
+    }
 
     fn mklist(vals: Vec<Value>) -> ValueRef {
         let mut list = Value::Nil;
