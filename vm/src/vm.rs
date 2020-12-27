@@ -87,7 +87,7 @@ fn make_predefined() -> Vec<ValueRef> {
         Value::Prim2(Primitive2{name: "eq?", func: prim_eq_p}),
         // these are referred to only by index, e.g., PREDEFINED(12)
         Value::Prim0(Primitive0{name: "read", func: prim_read}),
-        Value::Prim0(Primitive0{name: "newline", func: prim_newline}),
+        Value::Native(NativeProc{name: "newline", func: prim_newline}),
         Value::Native(NativeProc{name: "display", func: prim_display}),
         Value::Prim2(Primitive2{name: "+", func: prim_plus}),
         Value::Prim2(Primitive2{name: "-", func: prim_minus}),
@@ -582,7 +582,7 @@ impl VM<'_> {
             // CALL* opcodes: these called commonly-used primitives,
             // immediately.
             Opcode::CALL0_newline => {
-                self.call0(prim_newline);
+                self.invoke_native(prim_newline);
             },
             // TODO: read
             Opcode::CALL1_car => {
@@ -654,8 +654,11 @@ impl VM<'_> {
     }
 }
 
-fn prim_newline() -> Result<ValueRef, String> {
-    println!();
+fn prim_newline(vm: &mut VM) -> Result<ValueRef, String> {
+    match vm.output_stream {
+        Some(ref mut writer) => { write!(writer, "\n").expect("failed to write to output"); },
+        None => { println!(); }
+    };
     Ok(ValueRef::new(Value::Undefined))
 }
 
