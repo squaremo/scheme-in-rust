@@ -155,7 +155,7 @@ impl VM<'_> {
     }
 
     fn call2(&mut self, prim: fn(&ValueRef, &ValueRef) -> Result<ValueRef, String>) {
-        if let (Some(ValReg::value(ref v1)), Some(ref v2)) = (&self.val, &self.arg1) {
+        if let (Some(ref v1), Some(ValReg::value(ref v2))) = (&self.arg1, &self.val) {
             match prim(v1, v2) {
                 Ok(v) => self.set_val(v),
                 Err(e) => assert!(false, e),

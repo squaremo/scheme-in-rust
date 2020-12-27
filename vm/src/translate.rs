@@ -80,9 +80,9 @@ fn to_opcode(sym: &str, args: &[Expr]) -> Result<Opcode, String> {
         "global-ref" => opcode_index1(args, Opcode::GLOBAL_REF), // shouldn't see this, but CHECKED_... instead.
         "checked-global-ref" => opcode_index1(args, Opcode::CHECKED_GLOBAL_REF),
         "constant" => opcode_index1(args, Opcode::CONSTANT),
-        "predefined_hasht" => Ok(Opcode::PREDEFINED_HASHT),
-        "predefined_hashf" => Ok(Opcode::PREDEFINED_HASHF),
-        "predefined_nil" => Ok(Opcode::PREDEFINED_NIL),
+        "predefined-hasht" => Ok(Opcode::PREDEFINED_HASHT),
+        "predefined-hashf" => Ok(Opcode::PREDEFINED_HASHF),
+        "predefined-nil" => Ok(Opcode::PREDEFINED_NIL),
         "predefined_cons" => Ok(Opcode::PREDEFINED_CONS),
         "predefined_car" => Ok(Opcode::PREDEFINED_CAR),
         "predefined_cdr" => Ok(Opcode::PREDEFINED_CDR),
