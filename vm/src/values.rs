@@ -11,6 +11,9 @@ use crate::frame::FrameRef;
 
 pub type ValueRef = Rc<Value>;
 
+// Primitives are native procedures that have fixed arity, and work
+// with values directly.
+
 #[derive(Debug,PartialEq)]
 pub struct Primitive0 {
     pub name: &'static str,
@@ -59,8 +62,32 @@ impl PartialEq for Primitive2 {
     }
 }
 
+// NativeProc are native procedures that get access to the registers of
+// the VM. This is sometimes necessary for supporting input, output,
+// or varargs.
 
-// Ints and lists, for now.
+use crate::vm;
+
+pub struct NativeProc {
+    pub name: &'static str,
+    pub func: fn(&mut vm::VM) -> Result<ValueRef, String>,
+}
+
+impl fmt::Debug for NativeProc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NativeProc")
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+impl PartialEq for NativeProc {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name &&
+            self.func as usize == other.func as usize
+    }
+}
+
 #[derive(Debug,PartialEq)]
 pub enum Value {
     Symbol(String),
@@ -72,6 +99,7 @@ pub enum Value {
     Prim0(Primitive0),
     Prim1(Primitive1),
     Prim2(Primitive2),
+    Native(NativeProc),
     Undefined,
 }
 

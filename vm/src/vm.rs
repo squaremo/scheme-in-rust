@@ -1,8 +1,9 @@
 use std::ops::Deref;
+use std::io;
 
 use crate::instructions;
 use crate::instructions::{Opcode};
-use crate::values::{ValueRef,Value,Primitive0,Primitive1,Primitive2};
+use crate::values::{ValueRef,Value,Primitive0,Primitive1,Primitive2,NativeProc};
 use crate::frame::{Frame,FrameRef};
 use crate::read;
 
@@ -63,6 +64,11 @@ pub struct VM<'a> {
     // onto the stack while an activation frame is under construction.
     stack: Vec<StackEntry>,
 
+    // This is mainly for testing. Schemes often (by specification?)
+    // have a dynamic variable for the current output port, but I have
+    // not implemented either ports or dynamic variables.
+    output_stream: Option<&'a mut (dyn io::Write)>,
+
     // halted means the program has finished
     halted: bool,
 }
@@ -82,7 +88,7 @@ fn make_predefined() -> Vec<ValueRef> {
         // these are referred to only by index, e.g., PREDEFINED(12)
         Value::Prim0(Primitive0{name: "read", func: prim_read}),
         Value::Prim0(Primitive0{name: "newline", func: prim_newline}),
-        Value::Prim1(Primitive1{name: "display", func: prim_display}),
+        Value::Native(NativeProc{name: "display", func: prim_display}),
         Value::Prim2(Primitive2{name: "+", func: prim_plus}),
         Value::Prim2(Primitive2{name: "-", func: prim_minus}),
         Value::Prim2(Primitive2{name: "=", func: prim_equal}),
@@ -115,6 +121,7 @@ impl VM<'_> {
             code: program,
             pc: 0,
             stack: Vec::<StackEntry>::new(),
+            output_stream: None,
             halted: true,
         }
     }
@@ -196,6 +203,15 @@ impl VM<'_> {
         match result {
             Ok(result) => self.set_val(result),
             Err(e) => assert!(false, "INVOKE2: primitive returned error")
+        };
+    }
+
+    fn invoke_native(&mut self, prim: fn(&mut Self) -> Result<ValueRef, String>) {
+        match prim(self) {
+            Ok(ref v) => {
+                self.val = Some(ValReg::value(ValueRef::clone(v)));
+            },
+            Err(e) => assert!(false, "INVOKE_NATIVE: primitive returned error")
         };
     }
 
@@ -442,6 +458,10 @@ impl VM<'_> {
                             self.stack.push(StackEntry::return_address(self.pc));
                             self.invoke2(*f);
                         },
+                        Value::Native(NativeProc{name: _, func: f}) => {
+                            self.stack.push(StackEntry::return_address(self.pc));
+                            self.invoke_native(*f);
+                        }
                         _ => {
                             assert!(false, "FUNCTION_INVOKE: value in fun register is not a function");
                         }
@@ -466,6 +486,9 @@ impl VM<'_> {
                         Value::Prim2(Primitive2{name: _, func: f}) => {
                             self.invoke2(*f);
                         },
+                        Value::Native(NativeProc{name: _, func: f}) => {
+                            self.invoke_native(*f);
+                        }
                         _ => {
                             assert!(false, "FUNCTION_GOTO: value in fun register is not a function");
                         }
@@ -741,8 +764,73 @@ fn prim_read() -> Result<ValueRef, String> {
     Err(String::from("not implemented"))
 }
 
-fn prim_display(v1: &ValueRef) -> Result<ValueRef, String> {
-    Err(String::from("not implemented"))
+// If this used a global, or thread-local, for the output port, it
+// would be better implemented in Scheme. As it is, I need "native"
+// procedures with access to the registers anyway, so I can cheat
+// here.
+fn prim_display(vm: &mut VM) -> Result<ValueRef, String> {
+    if let Some(ValReg::new_frame(ref frame)) = vm.val {
+        if frame.args.len() != 2 { // meaning arity 1
+            return Err(String::from("expected 1 argument to display"))
+        }
+        let arg = frame.args[0].borrow();
+        if let Some(ref val) = *arg {
+            let mut s = String::new();
+            write_value(val, &mut s);
+            match &mut vm.output_stream {
+                Some(writer) => { write!(writer, "{}", s).expect("unable to write to writer") },
+                None => { print!("{}", s) },
+            };
+            Ok(ValueRef::new(Value::Undefined))
+        } else {
+            Err(String::from("argument in frame not initialised"))
+        }
+    } else {
+        Err(String::from(""))
+    }
+}
+
+fn write_value(v: &ValueRef, acc: &mut String) {
+    match v.deref() {
+        Value::Symbol(ref s) => acc.push_str(s),
+        Value::Int(i) => acc.push_str(&i.to_string()),
+        Value::Cons(hd, tl) => {
+            acc.push('(');
+            write_value(hd, acc);
+            let mut cell = tl;
+            loop {
+                match cell.deref() {
+                    Value::Cons(hd1, tl1) => {
+                        acc.push(' ');
+                        write_value(hd1, acc);
+                        cell = tl1;
+                    },
+                    Value::Nil => {
+                        acc.push(')');
+                        break;
+                    },
+                    _ => {
+                        acc.push_str(" . ");
+                        write_value(cell, acc);
+                        acc.push(')');
+                        break;
+                    }
+                }
+            }
+        },
+        Value::Nil => acc.push_str("'()"),
+        Value::Boolean(b) => if *b { acc.push_str("#t") } else { acc.push_str("#f") },
+        Value::Closure(_, _) => acc.push_str("#<lambda>"),
+        Value::Prim0(Primitive0{name, func: _}) |
+        Value::Prim1(Primitive1{name, func: _}) |
+        Value::Prim2(Primitive2{name, func: _}) => {
+            acc.push_str("#<native procedure ");
+            acc.push_str(name);
+            acc.push_str(">");
+        },
+        Value::Undefined => acc.push_str("#<undefined>"),
+        _ => assert!(false, "not implemented"),
+    };
 }
 
 #[cfg(test)]
@@ -1002,6 +1090,50 @@ mod tests {
         } else {
             assert!(false, "running program did not result in a (correct) value");
         }
+    }
+
+    #[test]
+    fn test_display() {
+        fn display(v: ValueRef, expected: &str) {
+            let consts = vec![v];
+            let prog = vec![
+                Opcode::PREDEFINED(11), Opcode::PUSH_VALUE,
+                Opcode::CONSTANT(0), Opcode::PUSH_VALUE,
+                Opcode::ALLOCATE_FRAME(2),
+                Opcode::POP_FRAME(0),
+                Opcode::POP_FUNCTION,
+                Opcode::FUNCTION_GOTO,
+                Opcode::FINISH,
+            ];
+
+            let mut output = Vec::<u8>::new();
+            {
+                use std::io::Cursor;
+                let out = &mut Cursor::new(&mut output);
+                let mut vm = VM::new(consts, &prog);
+                vm.output_stream = Some(out);
+                match vm.run_until_halt() {
+                    Some(_) => (),
+                    _ => {
+                        assert!(false, "running program did not result in a (correct) value");
+                    }
+                };
+                vm.output_stream = None;
+            }
+            let out = String::from_utf8(output).expect("output is UTF8");
+            assert_eq!(out, String::from(expected));
+        }
+
+        display(ValueRef::new(Value::Int(1)), "1");
+        display(ValueRef::new(Value::Boolean(true)), "#t");
+        display(ValueRef::new(Value::Boolean(false)), "#f");
+        display(ValueRef::new(Value::Nil), "'()");
+        display(ValueRef::new(Value::Undefined), "#<undefined>");
+        display(mklist(vec![
+            Value::Int(0), Value::Boolean(false),
+            Value::Cons(ValueRef::new(Value::Nil),
+                        ValueRef::new(Value::Symbol(String::from("foobar")))),
+        ]), "(0 #f ('() . foobar))");
     }
 
     fn mklist(vals: Vec<Value>) -> ValueRef {

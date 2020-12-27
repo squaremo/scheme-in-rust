@@ -441,10 +441,9 @@
   '*
   '/)
 
-;; They _do_ all have an inlined implementation
+;; They _do_ mostly have an inlined implementation (`display` doesn't)
 (define-primitive 'read 'CALL0_read 0)
 (define-primitive 'newline 'CALL0_newline 0)
-(define-primitive 'display 'CALL1_display 1)
 (define-primitive '+ 'CALL2_PLUS 2)
 (define-primitive '- 'CALL2_MINUS 2)
 (define-primitive '= 'CALL2_EQUAL 2)
