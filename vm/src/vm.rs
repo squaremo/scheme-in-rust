@@ -3,7 +3,7 @@ use std::io;
 
 use crate::instructions;
 use crate::instructions::{Opcode};
-use crate::values::{ValueRef,Value,Primitive0,Primitive1,Primitive2,NativeProc};
+use crate::values::{ValueRef,Value,NativeProc};
 use crate::frame::{Frame,FrameRef};
 use crate::read;
 
@@ -79,25 +79,25 @@ fn make_predefined() -> Vec<ValueRef> {
         Value::Boolean(true),  // HASHT
         Value::Boolean(false), // HASHF
         Value::Nil,
-        Value::Prim2(Primitive2{name: "cons", func: prim_cons}),
-        Value::Prim1(Primitive1{name: "car", func: prim_car}),
-        Value::Prim1(Primitive1{name: "cdr", func: prim_cdr}),
-        Value::Prim1(Primitive1{name: "pair?", func: prim_pair_p}),
-        Value::Prim1(Primitive1{name: "symbol?", func: prim_symbol_p}),
-        Value::Prim2(Primitive2{name: "eq?", func: prim_eq_p}),
+        Value::Native(NativeProc{name: "cons", func: invoke_cons}),
+        Value::Native(NativeProc{name: "car", func: invoke_car}),
+        Value::Native(NativeProc{name: "cdr", func: invoke_cdr}),
+        Value::Native(NativeProc{name: "pair?", func: invoke_pair_p}),
+        Value::Native(NativeProc{name: "symbol?", func: invoke_symbol_p}),
+        Value::Native(NativeProc{name: "eq?", func: invoke_eq_p}),
         // these are referred to only by index, e.g., PREDEFINED(12)
-        Value::Prim0(Primitive0{name: "read", func: prim_read}),
-        Value::Native(NativeProc{name: "newline", func: prim_newline}),
-        Value::Native(NativeProc{name: "display", func: prim_display}),
-        Value::Prim2(Primitive2{name: "+", func: prim_plus}),
-        Value::Prim2(Primitive2{name: "-", func: prim_minus}),
-        Value::Prim2(Primitive2{name: "=", func: prim_equal}),
-        Value::Prim2(Primitive2{name: "<", func: prim_lt}),
-        Value::Prim2(Primitive2{name: ">", func: prim_gt}),
-        Value::Prim2(Primitive2{name: "<=", func: prim_lte}),
-        Value::Prim2(Primitive2{name: ">=", func: prim_gte}),
-        Value::Prim2(Primitive2{name: "*", func: prim_times}),
-        Value::Prim2(Primitive2{name: "/", func: prim_divide}),
+        Value::Native(NativeProc{name: "read", func: invoke_read}),
+        Value::Native(NativeProc{name: "newline", func: invoke_newline}),
+        Value::Native(NativeProc{name: "display", func: invoke_display}),
+        Value::Native(NativeProc{name: "+", func: invoke_plus}),
+        Value::Native(NativeProc{name: "-", func: invoke_minus}),
+        Value::Native(NativeProc{name: "=", func: invoke_equal}),
+        Value::Native(NativeProc{name: "<", func: invoke_lt}),
+        Value::Native(NativeProc{name: ">", func: invoke_gt}),
+        Value::Native(NativeProc{name: "<=", func: invoke_lte}),
+        Value::Native(NativeProc{name: ">=", func: invoke_gte}),
+        Value::Native(NativeProc{name: "*", func: invoke_times}),
+        Value::Native(NativeProc{name: "/", func: invoke_divide}),
     ].into_iter().map(ValueRef::new).collect()
 }
 
@@ -136,13 +136,6 @@ impl VM<'_> {
         self.val = Some(ValReg::value(v));
     }
 
-    fn call0(&mut self, prim: fn() -> Result<ValueRef, String>) {
-        match prim() {
-            Ok(v) => self.set_val(v),
-            Err(e) => assert!(false, e),
-        }
-    }
-
     fn call1(&mut self, prim: fn(&ValueRef) -> Result<ValueRef, String>) {
         if let Some(ValReg::value(ref v1)) = &self.val {
             match prim(v1) {
@@ -163,6 +156,13 @@ impl VM<'_> {
         } else {
             assert!(false, "CALL2: val or arg1 register does not contain value");
         }
+    }
+
+    fn invoke0(&mut self, prim: fn() -> Result<ValueRef, String>) {
+        match prim() {
+            Ok(v) => self.set_val(v),
+            Err(e) => assert!(false, e),
+        };
     }
 
     // like call1, but gets arguments from the frame in *val*.
@@ -203,15 +203,6 @@ impl VM<'_> {
         match result {
             Ok(result) => self.set_val(result),
             Err(e) => assert!(false, "INVOKE2: primitive returned error")
-        };
-    }
-
-    fn invoke_native(&mut self, prim: fn(&mut Self) -> Result<ValueRef, String>) {
-        match prim(self) {
-            Ok(ref v) => {
-                self.val = Some(ValReg::value(ValueRef::clone(v)));
-            },
-            Err(e) => assert!(false, "INVOKE_NATIVE: primitive returned error")
         };
     }
 
@@ -450,17 +441,10 @@ impl VM<'_> {
                             self.pc = *pc;
                             self.env = env.clone();
                         },
-                        Value::Prim1(Primitive1{name: _, func: f}) => {
-                            self.stack.push(StackEntry::return_address(self.pc));
-                            self.invoke1(*f);
-                        },
-                        Value::Prim2(Primitive2{name: _, func: f}) => {
-                            self.stack.push(StackEntry::return_address(self.pc));
-                            self.invoke2(*f);
-                        },
                         Value::Native(NativeProc{name: _, func: f}) => {
                             self.stack.push(StackEntry::return_address(self.pc));
-                            self.invoke_native(*f);
+                            f(self);
+                            self.doreturn();
                         }
                         _ => {
                             assert!(false, "FUNCTION_INVOKE: value in fun register is not a function");
@@ -469,7 +453,6 @@ impl VM<'_> {
                 } else {
                     assert!(false, "FUNCTION_INVOKE: no value in fun register");
                 }
-                self.doreturn();
             },
             Opcode::FUNCTION_GOTO => { // tailcall
                 if let Some(ref funp) = self.fun {
@@ -480,14 +463,9 @@ impl VM<'_> {
                             self.pc = *pc;
                             self.env = env.clone();
                         },
-                        Value::Prim1(Primitive1{name: _, func: f}) => {
-                            self.invoke1(*f);
-                        },
-                        Value::Prim2(Primitive2{name: _, func: f}) => {
-                            self.invoke2(*f);
-                        },
                         Value::Native(NativeProc{name: _, func: f}) => {
-                            self.invoke_native(*f);
+                            f(self);
+                            self.doreturn();
                         }
                         _ => {
                             assert!(false, "FUNCTION_GOTO: value in fun register is not a function");
@@ -581,8 +559,10 @@ impl VM<'_> {
 
             // CALL* opcodes: these called commonly-used primitives,
             // immediately.
+
+            // newline needs access to the VM, so this doesn't use self.call(...)
             Opcode::CALL0_newline => {
-                self.invoke_native(prim_newline);
+                invoke_newline(self);
             },
             // TODO: read
             Opcode::CALL1_car => {
@@ -654,12 +634,20 @@ impl VM<'_> {
     }
 }
 
-fn prim_newline(vm: &mut VM) -> Result<ValueRef, String> {
+// Primitives: these come in two forms, one for calling directly by
+// CALL* opcodes, which get arguments from registers, and one for
+// creating native procedures as values which get arguments from an
+// activation frame. In the case of nullary procedures, the calling
+// convention is the same, since there's no arguments to fetch.
+
+// newline is an exception; it does not take arguments, and needs
+// access to the VM, so it does not delegate to vm.invoke*.
+fn invoke_newline(vm: &mut VM) {
     match vm.output_stream {
         Some(ref mut writer) => { write!(writer, "\n").expect("failed to write to output"); },
         None => { println!(); }
     };
-    Ok(ValueRef::new(Value::Undefined))
+    vm.set_val(ValueRef::new(Value::Undefined));
 }
 
 fn prim_car(v: &ValueRef) -> Result<ValueRef, String> {
@@ -669,6 +657,9 @@ fn prim_car(v: &ValueRef) -> Result<ValueRef, String> {
         Err("value is not a cons".to_string())
     }
 }
+fn invoke_car(vm: &mut VM) {
+    vm.invoke1(prim_car);
+}
 
 fn prim_cdr(v: &ValueRef) -> Result<ValueRef, String> {
     if let Value::Cons(_, ref tail) = v.deref() {
@@ -676,6 +667,9 @@ fn prim_cdr(v: &ValueRef) -> Result<ValueRef, String> {
     } else {
         Err("value is not a cons".to_string())
     }
+}
+fn invoke_cdr(vm: &mut VM) {
+    vm.invoke1(prim_cdr);
 }
 
 fn prim_pair_p(v: &ValueRef) -> Result<ValueRef, String> {
@@ -685,6 +679,9 @@ fn prim_pair_p(v: &ValueRef) -> Result<ValueRef, String> {
         Ok(ValueRef::new(Value::Boolean(false)))
     }
 }
+fn invoke_pair_p(vm: &mut VM) {
+    vm.invoke1(prim_pair_p);
+}
 
 fn prim_symbol_p(v: &ValueRef) -> Result<ValueRef, String> {
     if let Value::Symbol(_) = v.deref() {
@@ -693,9 +690,15 @@ fn prim_symbol_p(v: &ValueRef) -> Result<ValueRef, String> {
         Ok(ValueRef::new(Value::Boolean(false)))
     }
 }
+fn invoke_symbol_p(vm: &mut VM) {
+    vm.invoke1(prim_symbol_p);
+}
 
 fn prim_cons(hd: &ValueRef, tl: &ValueRef) -> Result<ValueRef, String> {
     Ok(ValueRef::new(Value::Cons(hd.clone(), tl.clone())))
+}
+fn invoke_cons(vm: &mut VM) {
+    vm.invoke2(prim_cons);
 }
 
 fn prim_eq_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
@@ -705,6 +708,9 @@ fn prim_eq_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     } else {
         Ok(ValueRef::new(Value::Boolean(false)))
     }
+}
+fn invoke_eq_p(vm: &mut VM) {
+    vm.invoke2(prim_eq_p);
 }
 
 fn arith(op: &Fn (i64, i64) -> i64, v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
@@ -718,17 +724,29 @@ fn arith(op: &Fn (i64, i64) -> i64, v1: &ValueRef, v2: &ValueRef) -> Result<Valu
 fn prim_plus(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     arith(&|a, b| a+b, v1, v2)
 }
+fn invoke_plus(vm: &mut VM) {
+    vm.invoke2(prim_plus);
+}
 
 fn prim_minus(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     arith(&|a, b| a-b, v1, v2)
+}
+fn invoke_minus(vm: &mut VM) {
+    vm.invoke2(prim_minus);
 }
 
 fn prim_times(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     arith(&|a, b| a*b, v1, v2)
 }
+fn invoke_times(vm: &mut VM) {
+    vm.invoke2(prim_times);
+}
 
 fn prim_divide(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     arith(&|a, b| a/b, v1, v2)
+}
+fn invoke_divide(vm: &mut VM) {
+    vm.invoke2(prim_divide);
 }
 
 fn compare(cmp: &Fn (i64, i64) -> bool, v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
@@ -743,39 +761,52 @@ fn prim_equal(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     // `=`, not `equal?`
     compare(&|a,b| a==b, v1, v2)
 }
+fn invoke_equal(vm: &mut VM) {
+    vm.invoke2(prim_equal);
+}
 
 fn prim_lt(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     // `=`, not `equal?`
     compare(&|a,b| a<b, v1, v2)
 }
+fn invoke_lt(vm: &mut VM) {
+    vm.invoke2(prim_lt);
+}
 
 fn prim_gt(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     compare(&|a,b| a>b, v1, v2)
+}
+fn invoke_gt(vm: &mut VM) {
+    vm.invoke2(prim_gt);
 }
 
 fn prim_lte(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     // `=`, not `equal?`
     compare(&|a,b| a<=b, v1, v2)
 }
+fn invoke_lte(vm: &mut VM) {
+    vm.invoke2(prim_lte);
+}
 
 fn prim_gte(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     // `=`, not `equal?`
     compare(&|a,b| a>=b, v1, v2)
 }
+fn invoke_gte(vm: &mut VM) {
+    vm.invoke2(prim_gte);
+}
 
-fn prim_read() -> Result<ValueRef, String> {
-    Err(String::from("not implemented"))
+fn invoke_read(_: &mut VM) {
+    assert!(false, "not implemented")
 }
 
 // If this used a global, or thread-local, for the output port, it
 // would be better implemented in Scheme. As it is, I need "native"
 // procedures with access to the registers anyway, so I can cheat
 // here.
-fn prim_display(vm: &mut VM) -> Result<ValueRef, String> {
+fn invoke_display(vm: &mut VM) {
     if let Some(ValReg::new_frame(ref frame)) = vm.val {
-        if frame.args.len() != 2 { // meaning arity 1
-            return Err(String::from("expected 1 argument to display"))
-        }
+        assert_eq!(frame.args.len(), 2, "expected 1 argument to display");
         let arg = frame.args[0].borrow();
         if let Some(ref val) = *arg {
             let mut s = String::new();
@@ -784,13 +815,13 @@ fn prim_display(vm: &mut VM) -> Result<ValueRef, String> {
                 Some(writer) => { write!(writer, "{}", s).expect("unable to write to writer") },
                 None => { print!("{}", s) },
             };
-            Ok(ValueRef::new(Value::Undefined))
         } else {
-            Err(String::from("argument in frame not initialised"))
+            assert!(false, "argument is not initialised");
         }
     } else {
-        Err(String::from(""))
+        assert!(false, "val register does not contain a frame");
     }
+    vm.set_val(ValueRef::new(Value::Undefined));
 }
 
 fn write_value(v: &ValueRef, acc: &mut String) {
@@ -824,9 +855,7 @@ fn write_value(v: &ValueRef, acc: &mut String) {
         Value::Nil => acc.push_str("'()"),
         Value::Boolean(b) => if *b { acc.push_str("#t") } else { acc.push_str("#f") },
         Value::Closure(_, _) => acc.push_str("#<lambda>"),
-        Value::Prim0(Primitive0{name, func: _}) |
-        Value::Prim1(Primitive1{name, func: _}) |
-        Value::Prim2(Primitive2{name, func: _}) => {
+        Value::Native(NativeProc{name, func: _}) => {
             acc.push_str("#<native procedure ");
             acc.push_str(name);
             acc.push_str(">");
