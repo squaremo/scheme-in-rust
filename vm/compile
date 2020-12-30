@@ -1,0 +1,27 @@
+#! /usr/bin/env scheme-r5rs
+
+(load "compile.ss")
+
+;; These are particular to SISC
+(max-stack-trace-depth 16)
+;(suppressed-stack-trace-source-kinds '())
+
+(define (compile)
+  (set! *quotations* '())
+  (let loop ((prog '()))
+    (let ((expr (read)))
+      (if (eof-object? expr)
+          `(program
+            (globals ,@(map car g.current))
+            (constants ,@*quotations*)
+            (code ,@prog))
+          (loop (append prog (compile-expr expr)))))))
+
+(define (main args)
+  (case (length args)
+    ((1)
+     (pretty-print (compile))
+     (newline))
+    ((2)
+     (pretty-print (with-input-from-file (cadr args) compile))
+     (newline))))

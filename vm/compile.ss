@@ -1,4 +1,5 @@
-#! /usr/bin/env scheme-r5rs
+;(max-stack-trace-depth 16)
+;(suppressed-stack-trace-source-kinds '())
 
 ;; Compile code into something that's readable by the bytecode
 ;; interpreter. This includes any quotations (literals) and things
@@ -14,24 +15,143 @@
 (define (compile-expr prog)
   (meaning-toplevel prog))
 
-(define (compile)
-  (set! *quotations* '())
-  (let loop ((prog '()))
-    (let ((expr (read)))
-      (if (eof-object? expr)
-          `(program
-            (constants ,@*quotations*)
-            (code ,@prog))
-          (loop (append prog (compile-expr expr)))))))
+;; Special forms
 
-(define (main args)
-  (case (length args)
-    ((1)
-     (pretty-print (compile))
-     (newline))
-    ((2)
-     (pretty-print (with-input-from-file (cadr args) compile))
-     (newline))))
+(define (meaning-expansion e r tail?)
+  (let ((special (assq (car e) *special*)))
+    (and special
+         (let ((expander (cadr special)))
+           (meaning (expander (cdr e)) r tail?)))))
+
+(define (expand-let e*)
+  (if (symbol? (car e*)) ;; -> (let loop ...)
+      (let ((loop (car e*))
+            (nn* (cadr e*))
+            (body (cddr e*)))
+        `(letrec ((,loop (lambda ,(map car nn*) ,@body)))
+           (,loop ,@(map cadr nn*))))
+      (let ((nn* (car e*))
+            (body (cdr e*)))
+        (if (pair? nn*)
+            `((lambda ,(map car nn*) ,@body) ,@(map cadr nn*))
+            `(begin ,@body)))))
+
+(define (expand-let* e*)
+  (let ((nn* (car e*))
+        (body (cdr e*)))
+    (if (pair? nn*)
+        (let ((nn (car nn*)))
+          `(let ,(list nn) ,(expand-let* `(let* ,(cdr nn*) ,@body))))
+        `(begin ,@body))))
+
+(define (expand-letrec e*)
+  ;; (letrec (binding...) body...)
+  (let ((nn* (car e*))
+        (body (cdr e*)))
+    (if (pair? nn*)
+        `(let ,(map (lambda (nn) (list (car nn) #f)) nn*)
+           ,@(map (lambda (nn) `(set! ,(car nn) ,(cadr nn))) nn*)
+           ,@body)
+        `(begin ,@body))))
+
+(define (expand-and e*)
+  (if (pair? e*)
+      (if (pair? (cdr e*))
+          `(if ,(car e*) (and ,@(cdr e*)) #f)
+          (car e*))
+      (quote #t)))
+
+(define (expand-or e*)
+  (if (pair? e*)
+      (if (pair? (cdr e*))
+          `(let (($$ ,(car e*))) (if $$ $$ (or ,@(cdr e*))))
+          (car e*))
+      (quote #f)))
+
+(define (expand-cond e*)
+  ;; (cond cond-clause...)
+  ;; where
+  ;; cond-clause =
+  ;;   (test-expr expr...)
+  ;; | (test-expr)
+  ;; | (else expr...)
+  (if (pair? e*)
+      (let ((first (car e*)))
+        (if (equal? (car first) 'else)
+            `(begin ,@(cdr first))
+            (if (null? (cdr first))
+                `(or ,(car first) (cond ,@(cdr e*)))
+                `(if ,(car first) (begin ,@(cdr first)) (cond ,@(cdr e*))))))
+      (quote #f)))
+
+;; NB uses `member`, which therefore needs to be defined in the host
+;; environment.
+(define (expand-case e*)
+  ;; (case expr case-clause...)
+  ;; where
+  ;; case-clause =
+  ;;   ((value...) body-expr...)
+  ;; | (else body-expr...)
+  `(let (($$val ,(car e*)))
+     ,(let loop ((clauses (cdr e*)))
+        (if (pair? clauses)
+            (let ((clause (car clauses)))
+              (if (equal? (car clause) 'else)
+                  `(begin ,@(cdr clause))
+                  `(if (member $$val (quote ,(car clause)))
+                       (begin ,@(cdr clause))
+                       ,(loop (cdr clauses)))))
+            (quote #f)))))
+
+;; Unlike other macros, which are content to deal with chunks of
+;; syntax at a time, this recurses down into the structure of its
+;; argument, because an unquote can appear anywhere. This is based on
+;; Alan Bawden's implementation in
+;; http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.309.227 NB
+;; requires `append` and `list`.
+(define (expand-quasiquote e)
+  ;; This gets applied to the argument of quasiquote, rather than the
+  ;; _rest_.
+  (define (expand-quote e)
+    (if (pair? e)
+        (case (car e)
+          ((unquote) (cadr e))
+          ((unquote-splicing) (compiler-error "unquote-splicing not allowed in this context"))
+          ((quasiquote) (expand-quote (expand-quote (cadr e)))) ;; why twice?
+          (else `(append ,(expand-list (car e)) ,(expand-quote (cdr e)))))
+        `(quote ,e)))
+
+  ;; expand a datum as a member of a list
+  (define (expand-list e)
+    (if (pair? e)
+        (case (car e)
+          ((unquote) `(list ,(cadr e)))
+          ((unquote-splicing) (cadr e))
+          ((quasiquote) (expand-list (expand-quote (cadr e))))
+          (else `(list (append ,(expand-list (car e))
+                               ,(expand-quote (cdr e))))))
+        `(quote (,e))))
+
+  (expand-quote (car e)))
+
+(define *special*
+  `((let ,expand-let)
+    (let* ,expand-let*)
+    (letrec ,expand-letrec)
+    (and ,expand-and)
+    (or ,expand-or)
+    (cond ,expand-cond)
+    (case ,expand-case)
+    ;; these need careful treatment to avoid being interpreted themselves
+    (,(quote quasiquote) ,expand-quasiquote)
+    (,(quote unquote) ,(lambda ()
+                         (compiler-error
+                          "unquote only allowed in context of quasiquote")))
+    (,(quote unquote-splicing) ,(lambda ()
+                                  (compiler-error
+                                   "unquote-splicing only allowed in context of quasiquote")))))
+
+;; end special forms
 
 ;; --------- these were originally copypasta from
 ;;
@@ -46,11 +166,14 @@
       (case (car e)
         ((quote) (meaning-quotation (cadr e) r tail?))
         ((lambda) (meaning-abstraction (cadr e) (cddr e) r tail?))
-        ((if) (meaning-alternative (cadr e) (caddr e) (cadddr e)
+        ((if) (meaning-alternative (cadr e) (caddr e)
+                                   (if (pair? (cdddr e)) (cadddr e) #f)
                                    r tail?))
         ((begin) (meaning-sequence (cdr e) r tail?))
         ((set!) (meaning-assignment (cadr e) (caddr e) r tail?))
-        (else (meaning-application (car e) (cdr e) r tail?)))
+        (else ;; this is modified copypasta, to account for expansions
+         (or (meaning-expansion e r tail?)
+             (meaning-application (car e) (cdr e) r tail?))))
       (if (symbol? e)
           (meaning-deref e r tail?)
           (meaning-quotation e r tail?))))
@@ -192,6 +315,7 @@
 ;; left-left-lambda
 ;; ((lambda (n*...) body) ee*...)
 (define (meaning-closed-application e ee* r tail?)
+;;  (display e)(display ee*)(newline)
   (let parse ((n* (cadr e))
               (e* ee*)
               (regular '()))
@@ -475,7 +599,7 @@
 ;; fragments are lists of instructions.
 
 (define (SHALLOW-ASSIGNMENT! j m)
-  (append m (SET-SHALLOW-ARGUMENT! k)))
+  (append m (SET-SHALLOW-ARGUMENT! j)))
 
 (define (DEEP-ASSIGNMENT! i j m)
   (append m (SET-DEEP-ARGUMENT! i j)))
