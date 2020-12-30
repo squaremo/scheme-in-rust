@@ -539,15 +539,19 @@
 (define-initial 'car 'PREDEFINED_CAR)
 (define-initial 'cdr 'PREDEFINED_CDR)
 (define-initial 'pair? 'PREDEFINED_PAIR_P)
+(define-initial 'null? 'PREDEFINED_PAIR_P)
 (define-initial 'symbol? 'PREDEFINED_SYMBOL_P)
 (define-initial 'eq? 'PREDEFINED_EQ_P)
+(define-initial 'equal? 'PREDEFINED_EQUAL_P)
 
 (define-primitive 'cons 'CALL2_cons 2)
 (define-primitive 'car 'CALL1_car 1)
 (define-primitive 'cdr 'CALL1_cdr 1)
 (define-primitive 'pair? 'CALL1_pair_p 1)
+(define-primitive 'null? 'CALL1_null_p 1)
 (define-primitive 'symbol? 'CALL1_symbol_p 1)
 (define-primitive 'eq? 'CALL2_eq_p 2)
+(define-primitive 'equal? 'CALL2_equal_p 2)
 
 ;; These don't come with a dedicated opcode for the value, but they do
 ;; need an entry so that they'll be compiled to a predefind lookup.
@@ -570,7 +574,7 @@
 (define-primitive 'newline 'CALL0_newline 0)
 (define-primitive '+ 'CALL2_PLUS 2)
 (define-primitive '- 'CALL2_MINUS 2)
-(define-primitive '= 'CALL2_EQUAL 2)
+(define-primitive '= 'CALL2_EQUALS 2)
 (define-primitive '< 'CALL2_LT 2)
 (define-primitive '> 'CALL2_GT 2)
 (define-primitive '<= 'CALL2_LE 2)
@@ -616,9 +620,9 @@
 
 (define (CONSTANT v)
   (cond
-    ((eq? v #t)    '((predefined-hasht)))
-    ((eq? v #f)    '((predefined-hashf)))
-    ((eq? v '())   '((predefined-nil)))
+    ((eq? v #t)    '((predefined_hasht)))
+    ((eq? v #f)    '((predefined_hashf)))
+    ((eq? v '())   '((predefined_nil)))
     ;; some allegedly commonly-used integers get their own opcodes
     ((equal? v -1) '((int_neg1)))
     ((equal? v 0)  '((int_0)))

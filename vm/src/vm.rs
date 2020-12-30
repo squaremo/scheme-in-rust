@@ -86,15 +86,17 @@ fn make_predefined() -> Vec<ValueRef> {
         Value::Native(NativeProc{name: "car", func: invoke_car}),
         Value::Native(NativeProc{name: "cdr", func: invoke_cdr}),
         Value::Native(NativeProc{name: "pair?", func: invoke_pair_p}),
+        Value::Native(NativeProc{name: "null?", func: invoke_null_p}),
         Value::Native(NativeProc{name: "symbol?", func: invoke_symbol_p}),
         Value::Native(NativeProc{name: "eq?", func: invoke_eq_p}),
-        // these are referred to only by index, e.g., PREDEFINED(12)
+        Value::Native(NativeProc{name: "equal?", func: invoke_equal_p}),
+        // these are referred to only by index, e.g., PREDEFINED(13)
         Value::Native(NativeProc{name: "read", func: invoke_read}),
         Value::Native(NativeProc{name: "newline", func: invoke_newline}),
         Value::Native(NativeProc{name: "display", func: invoke_display}),
         Value::Native(NativeProc{name: "+", func: invoke_plus}),
         Value::Native(NativeProc{name: "-", func: invoke_minus}),
-        Value::Native(NativeProc{name: "=", func: invoke_equal}),
+        Value::Native(NativeProc{name: "=", func: invoke_equals}),
         Value::Native(NativeProc{name: "<", func: invoke_lt}),
         Value::Native(NativeProc{name: ">", func: invoke_gt}),
         Value::Native(NativeProc{name: "<=", func: invoke_lte}),
@@ -622,6 +624,9 @@ impl VM<'_> {
             Opcode::CALL1_pair_p => {
                 self.call1(prim_pair_p);
             },
+            Opcode::CALL1_null_p => {
+                self.call1(prim_null_p);
+            },
             Opcode::CALL1_symbol_p => {
                 self.call1(prim_symbol_p);
             },
@@ -631,14 +636,17 @@ impl VM<'_> {
             Opcode::CALL2_eq_p => {
                 self.call2(prim_eq_p);
             },
+            Opcode::CALL2_equal_p => {
+                self.call2(prim_equal_p);
+            },
             Opcode::CALL2_PLUS => {
                 self.call2(prim_plus);
             },
             Opcode::CALL2_MINUS => {
                 self.call2(prim_minus);
             },
-            Opcode::CALL2_EQUAL => {
-                self.call2(prim_equal);
+            Opcode::CALL2_EQUALS => {
+                self.call2(prim_equals);
             },
             Opcode::CALL2_LT => {
                 self.call2(prim_lt);
@@ -731,6 +739,17 @@ fn invoke_pair_p(vm: &mut VM) {
     vm.invoke1(prim_pair_p);
 }
 
+fn prim_null_p(v: &ValueRef) -> Result<ValueRef, String> {
+    if let Value::Nil = v.deref() {
+        Ok(ValueRef::new(Value::Boolean(true)))
+    } else {
+        Ok(ValueRef::new(Value::Boolean(false)))
+    }
+}
+fn invoke_null_p(vm: &mut VM) {
+    vm.invoke1(prim_null_p);
+}
+
 fn prim_symbol_p(v: &ValueRef) -> Result<ValueRef, String> {
     if let Value::Symbol(_) = v.deref() {
         Ok(ValueRef::new(Value::Boolean(true)))
@@ -760,6 +779,30 @@ fn prim_eq_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
 fn invoke_eq_p(vm: &mut VM) {
     vm.invoke2(prim_eq_p);
 }
+
+fn prim_equal_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+    fn eq(v1: &ValueRef, v2: &ValueRef) -> bool {
+        match (v1.deref(), v2.deref()) {
+            (Value::Nil, Value::Nil) => true,
+            (Value::Int(i1), Value::Int(i2)) => i1 == i2,
+            (Value::Symbol(s1), Value::Symbol(s2)) => s1 == s2,
+            (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
+            (Value::Cons(hd1, tl1), Value::Cons(hd2, tl2)) => {
+                if eq(hd1, hd2) {
+                    eq(tl1, tl2) // naughty stack-eating recursion
+                } else {
+                    false
+                }
+            },
+            _ => false
+        }
+    }
+    Ok(ValueRef::new(Value::Boolean(eq(v1, v2))))
+}
+fn invoke_equal_p(vm: &mut VM) {
+    vm.invoke2(prim_eq_p);
+}
+
 
 fn arith(op: &Fn (i64, i64) -> i64, v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     if let (Value::Int(a), Value::Int(b)) = (v1.deref(), v2.deref()) {
@@ -805,12 +848,12 @@ fn compare(cmp: &Fn (i64, i64) -> bool, v1: &ValueRef, v2: &ValueRef) -> Result<
     }
 }
 
-fn prim_equal(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
+fn prim_equals(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     // `=`, not `equal?`
     compare(&|a,b| a==b, v1, v2)
 }
-fn invoke_equal(vm: &mut VM) {
-    vm.invoke2(prim_equal);
+fn invoke_equals(vm: &mut VM) {
+    vm.invoke2(prim_equals);
 }
 
 fn prim_lt(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
@@ -1177,7 +1220,7 @@ mod tests {
         fn display(v: ValueRef, expected: &str) {
             let consts = vec![v];
             let prog = vec![
-                Opcode::PREDEFINED(11), Opcode::PUSH_VALUE,
+                Opcode::PREDEFINED(13), Opcode::PUSH_VALUE,
                 Opcode::CONSTANT(0), Opcode::PUSH_VALUE,
                 Opcode::ALLOCATE_FRAME(2),
                 Opcode::POP_FRAME(0),
