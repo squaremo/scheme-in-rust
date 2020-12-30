@@ -71,6 +71,9 @@ pub struct VM<'a> {
 
     // halted means the program has finished
     halted: bool,
+
+    // print a trace
+    trace: bool,
 }
 
 fn make_predefined() -> Vec<ValueRef> {
@@ -123,6 +126,7 @@ impl VM<'_> {
             stack: Vec::<StackEntry>::new(),
             output_stream: None,
             halted: true,
+            trace: false,
         }
     }
 
@@ -214,9 +218,52 @@ impl VM<'_> {
         }
     }
 
+    fn print_trace(&self) {
+        fn print_stack(stack: &Vec<StackEntry>) {
+            print!("[");
+            stack.iter().for_each(|entry| {
+                match entry {
+                    StackEntry::value(ref v) => {
+                        let mut s = String::new();
+                        write_value(v, &mut s);
+                        print!("{}, ", s);
+                    },
+                    StackEntry::frame(_) => {
+                        print!("frame, ");
+                    },
+                    StackEntry::return_address(pc) => {
+                        print!("return address {}, ", pc);
+                    },
+                }
+            });
+            print!("]");
+        }
+        print!("[TRACE] == stack == "); print_stack(&self.stack); println!();
+        print!("[TRACE] == *val* == "); match &self.val {
+            None => print!("#empty#"),
+            Some(r) => {
+                match r {
+                    ValReg::value(ref v) => {
+                        let mut s = String::new();
+                        write_value(v, &mut s);
+                        print!("{}", s);
+                    },
+                    ValReg::new_frame(_) => {
+                        print!("frame");
+                    }
+                }
+            }
+        }; println!();
+    }
+
     pub fn step(&mut self) {
         assert!(self.pc < self.code.len(), "no instruction to run at program counter");
         let instr = &self.code[self.pc];
+
+        if self.trace {
+            println!("[TRACE] instr: {:?}, stack height: {}", instr, self.stack.len());
+            self.print_trace();
+        }
         self.pc += 1;
         match instr {
             // Getting values from the environment
@@ -344,7 +391,8 @@ impl VM<'_> {
 
             // Function-calling machinery
             Opcode::EXTEND_ENV => {
-                if let Some(ValReg::new_frame(ref f)) = self.val {
+                if let Some(ValReg::new_frame(ref mut f)) = self.val {
+                    f.next = Some(self.env.clone());
                     self.env = FrameRef::new(f.clone())
                 } else {
                     assert!(false, "EXTEND_ENV: val register does not contain a frame");
@@ -467,8 +515,8 @@ impl VM<'_> {
                             f(self);
                             self.doreturn();
                         }
-                        _ => {
-                            assert!(false, "FUNCTION_GOTO: value in fun register is not a function");
+                        v => {
+                            assert!(false, "FUNCTION_GOTO: value in fun register is not a function, it is {:?}", v);
                         }
                     }
                 } else {
@@ -495,7 +543,7 @@ impl VM<'_> {
             },
             Opcode::ALLOCATE_FRAME(i) => {
                 self.val = Some(ValReg::new_frame(
-                    Frame::extend(self.env.clone(), *i),
+                    Frame::new(*i),
                 ));
             },
             Opcode::ALLOCATE_DOTTED_FRAME(i) => {
