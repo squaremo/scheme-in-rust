@@ -8,6 +8,8 @@
 (define (cdddr e) (cdr (cddr e)))
 (define (cadddr e) (car (cdddr e)))
 
+(define (list . args) args)
+
 ;; This is the `eq?` version of {assq, assv, assoc}
 (define (assq v lst)
   (if (null? lst)
