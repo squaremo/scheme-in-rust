@@ -86,6 +86,15 @@ fn parse_expr(i: &str) -> IResult<&str, Expr> {
         map(preceded(char('\''), alt((parse_list, parse_atom))),
             |e| Expr::List(Box::new(Expr::Symbol(String::from("quote"))), vec![e])
         ),
+        map(preceded(char('`'), alt((parse_list, parse_atom))),
+            |e| Expr::List(Box::new(Expr::Symbol(String::from("quasiquote"))), vec![e])
+        ),
+        map(preceded(char(','), alt((parse_list, parse_atom))),
+            |e| Expr::List(Box::new(Expr::Symbol(String::from("unquote"))), vec![e])
+        ),
+        map(preceded(tag(",@"), alt((parse_list, parse_atom))),
+            |e| Expr::List(Box::new(Expr::Symbol(String::from("unquote-splicing"))), vec![e])
+        ),
         // normal ol' expression
         alt((parse_list, parse_atom)))
     )(i)
@@ -143,4 +152,11 @@ fn quote_syntax() {
     assert_eq!(Ok(("", Expr::List(Box::new(sym), vec![bol, nums]))),
                parse_expr("(sym 'bol '(2 3))"));
     assert_eq!(Ok(("", Expr::List(Box::new(quote0.clone()), vec![Expr::Nil]))), parse_expr("'()"));
+}
+
+#[test]
+fn quasi_reader_syntax() {
+    let orig = "(foo `(bar ,baz ,@boo))";
+    let expanded = "(foo (quasiquote (bar (unquote baz) (unquote-splicing boo))))";
+    assert_eq!(parse_expr(orig), parse_expr(expanded));
 }
