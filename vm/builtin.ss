@@ -10,6 +10,13 @@
 
 (define (list . args) args)
 
+(define (length lst)
+  (let loop ((len 0)
+             (rest lst))
+    (if (null? rest)
+        len
+        (loop (+ len 1) (cdr rest)))))
+
 ;; This is the `eq?` version of {assq, assv, assoc}
 (define (assq v lst)
   (if (null? lst)
