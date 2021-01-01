@@ -137,8 +137,8 @@ fn to_opcode(sym: &str, args: &[Expr]) -> Result<Opcode, String> {
         "call2_equals" => Ok(Opcode::CALL2_EQUALS),
         "call2_lt" => Ok(Opcode::CALL2_LT),
         "call2_gt" => Ok(Opcode::CALL2_GT),
-        "call2_lte" => Ok(Opcode::CALL2_LTE),
-        "call2_gte" => Ok(Opcode::CALL2_GTE),
+        "call2_le" => Ok(Opcode::CALL2_LE),
+        "call2_ge" => Ok(Opcode::CALL2_GE),
         "call2_times" => Ok(Opcode::CALL2_TIMES),
         "call2_divide" => Ok(Opcode::CALL2_DIVIDE),
 

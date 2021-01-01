@@ -166,8 +166,8 @@ pub enum Opcode {
     CALL2_EQUALS,
     CALL2_LT,
     CALL2_GT,
-    CALL2_LTE,
-    CALL2_GTE,
+    CALL2_LE,
+    CALL2_GE,
     CALL2_TIMES,
     CALL2_DIVIDE,
 }

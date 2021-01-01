@@ -654,10 +654,10 @@ impl VM<'_> {
             Opcode::CALL2_GT => {
                 self.call2(prim_gt);
             },
-            Opcode::CALL2_LTE => {
+            Opcode::CALL2_LE => {
                 self.call2(prim_lte);
             },
-            Opcode::CALL2_GTE => {
+            Opcode::CALL2_GE => {
                 self.call2(prim_gte);
             },
             Opcode::CALL2_TIMES => {
