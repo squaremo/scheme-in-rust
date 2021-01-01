@@ -3,12 +3,11 @@
 use nom::{
     IResult,
 };
-use nom::character::complete::{digit1,one_of};
 use nom::{
-    bytes::complete::tag,
+    bytes::complete::{tag,is_not},
     combinator::{map, all_consuming},
     multi::many0,
-    character::complete::{satisfy,char,multispace0},
+    character::complete::{satisfy,char,multispace0,digit1,one_of},
     branch::alt,
     sequence::{tuple,delimited,preceded},
 };
@@ -17,6 +16,7 @@ use nom::{
 pub enum Expr {
     Int(i64),
     Symbol(String),
+    String(String),
     List(Box<Expr>, Vec<Expr>), // head, tail
     Nil, // empty list
     True,
@@ -59,8 +59,19 @@ fn parse_symbol(i: &str) -> IResult<&str, Expr> {
         })(i)
 }
 
+fn parse_string(i: &str) -> IResult<&str, Expr> {
+    map(delimited(
+        char('"'),
+        // dead simple for the minute -- no escapes
+        is_not("\""),
+        char('"'),
+    ), |s| {
+        Expr::String(String::from(s))
+    })(i)
+}
+
 fn parse_atom(i: &str) -> IResult<&str, Expr> {
-    alt((parse_int, parse_symbol, parse_bool))(i)
+    alt((parse_int, parse_symbol, parse_bool, parse_string))(i)
 }
 
 fn parse_list(i: &str) -> IResult<&str, Expr> {
@@ -116,6 +127,8 @@ fn atom_parser() {
     // symbols
     assert_eq!(Ok(("", Expr::Symbol(String::from("sym")))), parse_symbol("sym"));
     assert_eq!(Ok(("",Expr::Symbol(String::from("=sym/098765+")))), parse_symbol("=sym/098765+"));
+    // bools
+    assert_eq!(Ok(("", Expr::String(String::from("foobar")))), parse_string("\"foobar\""));
 }
 
 #[test]

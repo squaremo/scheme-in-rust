@@ -919,6 +919,8 @@ fn write_value(v: &ValueRef, acc: &mut String) {
     match v.deref() {
         Value::Symbol(ref s) => acc.push_str(s),
         Value::Int(i) => acc.push_str(&i.to_string()),
+        Value::Boolean(b) => if *b { acc.push_str("#t") } else { acc.push_str("#f") },
+        Value::String(s) => acc.push_str(s),
         Value::Cons(hd, tl) => {
             acc.push('(');
             write_value(hd, acc);
@@ -944,7 +946,6 @@ fn write_value(v: &ValueRef, acc: &mut String) {
             }
         },
         Value::Nil => acc.push_str("'()"),
-        Value::Boolean(b) => if *b { acc.push_str("#t") } else { acc.push_str("#f") },
         Value::Closure(_, _) => acc.push_str("#<lambda>"),
         Value::Native(NativeProc{name, func: _}) => {
             acc.push_str("#<native procedure ");

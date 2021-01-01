@@ -43,6 +43,7 @@ impl PartialEq for NativeProc {
 pub enum Value {
     Symbol(String),
     Int(i64),
+    String(String),
     Cons(ValueRef, ValueRef), // allow improper lists
     Nil,
     Boolean(bool),

@@ -50,6 +50,7 @@ fn valuify(expr: &Expr) -> ValueRef {
     match expr {
         Expr::Int(i) => ValueRef::new(Value::Int(*i)),
         Expr::Symbol(s) => ValueRef::new(Value::Symbol(String::from(s))),
+        Expr::String(s) => ValueRef::new(Value::String(String::from(s))),
         Expr::List(h, t) => {
             let items = (vec![h.deref()].into_iter()).chain(t.into_iter());
             items.map(valuify).rev().fold(ValueRef::new(Value::Nil), |a, v| {
