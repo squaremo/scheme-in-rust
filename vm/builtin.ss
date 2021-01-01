@@ -36,23 +36,28 @@
 
 ;; This map only needs to deal with one list.
 (define (map fn lst)
-  (if (pair? lst)
-      (cons (fn (car lst)) (map fn (cdr lst)))))
+  (let loop ((rest lst)
+             (acc '()))
+    (if (null? rest)
+        (reverse acc)
+        (loop (cdr rest) (cons (fn (car rest)) acc)))))
 
 ;; Used for compiling quasiquote, possibly elsewhere.
 (define (append1 list1 list2)
-  (let loop ((rev (reverse list1))
-             (acc list2))
-    (if (pair? rev)
-        (loop (cdr rev) (cons (car rev) acc))
-        acc)))
+  (cond ((null? list2) list1)
+        ((null? list1) list2)
+        (else
+         (let loop ((rev (reverse list1))
+                    (acc list2))
+           (if (pair? rev)
+               (loop (cdr rev) (cons (car rev) acc))
+               acc)))))
 
 (define (append . lists)
-  ;; (append '(1 2 3) '(4 5 6) '(7 8 9))
-  ;; => (append1 '(1 2 3) (append1 '(4 5 6) '(7 8 9)))
-  (if (pair? lists)
-      (append1 (car lists) (append . (cdr lists)))
-      '()))
+  (let loop ((rest lists))
+    (if (null? rest)
+        '()
+        (append1 (car rest) (loop (cdr rest))))))
 
 ;; Needed for append1 above, maybe elsewhere.
 (define (reverse lst)
