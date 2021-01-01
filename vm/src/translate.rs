@@ -64,13 +64,16 @@ fn valuify(expr: &Expr) -> ValueRef {
 }
 
 fn to_instructions(exprs: &[Expr]) -> Result<Vec<Opcode>, String> {
-    exprs.into_iter().map(|instr| {
+    exprs.into_iter().filter_map(|instr| {
         if let Expr::List(h, t) = instr {
             if let Expr::Symbol(ref s) = h.deref() {
-                return to_opcode(s, t)
+                if s == "comment" {
+                    return None
+                }
+                return Some(to_opcode(s, t))
             }
         }
-        return Err(format!("unrecognised instruction {:?}", instr))
+        return Some(Err(format!("unrecognised instruction {:?}", instr)))
     }).collect::<Result<Vec<Opcode>, String>>()
 }
 
@@ -147,7 +150,7 @@ fn to_opcode(sym: &str, args: &[Expr]) -> Result<Opcode, String> {
 }
 
 fn opcode_index1<T: TryFrom<i64>>(args: &[Expr], opcode: fn(T) -> Opcode) -> Result<Opcode, String> {
-    if args.len() == 1 {
+    if args.len() >= 1 {
         if let Expr::Int(i) = args[0] {
             let ind = index_from(i)?;
             return Ok(opcode(ind))
@@ -157,7 +160,7 @@ fn opcode_index1<T: TryFrom<i64>>(args: &[Expr], opcode: fn(T) -> Opcode) -> Res
 }
 
 fn opcode_index2<S: TryFrom<i64>, T: TryFrom<i64>>(args: &[Expr], opcode: fn(S, T) -> Opcode) -> Result<Opcode, String> {
-    if args.len() == 2 {
+    if args.len() >= 2 {
         if let (Expr::Int(i1), Expr::Int(i2)) = (&args[0], &args[1]) {
             let ind1 = index_from(*i1)?;
             let ind2 = index_from(*i2)?;

@@ -25,11 +25,14 @@ fn main() {
 
     match read::parse_line(&contents) {
         Ok((_, expr)) => {
+            eprintln!("Read file");
             match translate::translate(expr) {
                 Ok(program) => {
+                    eprintln!("Translated program");
                     let mut code = program.code;
                     code.push(Opcode::FINISH);
                     let mut vm = VM::new(program.constants, &mut code);
+                    vm.trace = true;
                     let val = vm.run_until_halt();
                                 println!("{:#?}", val);
                 },

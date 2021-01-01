@@ -14,8 +14,24 @@
           `(program
             (globals ,@(map car g.current))
             (constants ,@*quotations*)
-            (code ,@prog))
+            (code ,@(line-numbers prog)))
           (loop (append prog (compile-expr expr)))))))
+
+;; Put comments in the instructions, every 10 instructions
+(define (line-numbers prog)
+  (let loop ((line 0)
+             (out '())
+             (rest prog))
+    (if (null? rest)
+        (reverse out)
+        (let ((instr (car rest)))
+          (if (equal? (car instr) 'comment)
+              (loop line out (cdr rest))
+              (loop (+ line 1)
+                    (if (= 0 (modulo line 10))
+                        (cons instr (cons (list 'comment 'lineno line) out))
+                        (cons instr out))
+                    (cdr rest)))))))
 
 (define (main args)
   (case (length args)

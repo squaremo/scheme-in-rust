@@ -192,15 +192,16 @@
           ((local)
            (let ((level (cadr kind))
                  (index (cddr kind)))
-             (if (= level 0)
-                 (SHALLOW-ARGUMENT-REF index)
-                 (DEEP-ARGUMENT-REF level index))))
+             (COMMENT (list 'local n)
+                      (if (= level 0)
+                          (SHALLOW-ARGUMENT-REF index)
+                          (DEEP-ARGUMENT-REF level index)))))
           ((global)
            (let ((index (cdr kind)))
-             (CHECKED-GLOBAL-REF index)))
+             (COMMENT (list 'global n) (CHECKED-GLOBAL-REF index))))
           ((predefined)
            (let ((index (cdr kind)))
-             (PREDEFINED index))))
+             (COMMENT (list 'predef n) (PREDEFINED index)))))
         (compiler-error "No such variable" n))))
 
 ;; Conditional
@@ -265,9 +266,10 @@
                       ;; expanded environment, so they have to be
                       ;; delayed until I have that latter.
                       (cons (lambda (r2)
-                              (SHALLOW-ASSIGNMENT!
-                               level
-                               (meaning-abstraction (cdar d) (cdr d) r2 #f)))
+                              (COMMENT (list 'define (caar d))
+                                       (SHALLOW-ASSIGNMENT!
+                                        level
+                                        (meaning-abstraction (cdar d) (cdr d) r2 #f))))
                             sets)
                       (cdr defs))
                 ;; else (define a expr)
@@ -276,9 +278,10 @@
                     (compiler-error "Illegal syntax: expected single expression in form (define a expr)")
                     (loop (cons (car d) names)
                           (cons (lambda (r2)
-                                  (SHALLOW-ASSIGNMENT!
-                                   level
-                                   (meaning (cadr d) r2 #f)))
+                                  (COMMENT (list 'define (car d))
+                                           (SHALLOW-ASSIGNMENT!
+                                            level
+                                            (meaning (cadr d) r2 #f))))
                                 sets)
                           (cdr defs)))))
           (let ((r2 (r-extend* r (reverse names)))) ;; re-reverse
@@ -479,12 +482,14 @@
     (let* ((binding (or (global-variable? g.current (car n))
                         (global-extend! (car n))))
            (level (cdr binding)))
-      (GLOBAL-SET! level (meaning-abstraction (cdr n) e* r.init #t) )))
+      (COMMENT (list 'define (car n))
+               (GLOBAL-SET! level (meaning-abstraction (cdr n) e* r.init #t) ))))
    (else
     (let* ((binding (or (global-variable? g.current n)
                         (global-extend! n)))
            (level (cdr binding)))
-      (GLOBAL-SET! level (meaning (car e*) r.init #t))))))
+      (COMMENT (list 'define n)
+               (GLOBAL-SET! level (meaning (car e*) r.init #t)))))))
 
 ;; ------- Backend
 
@@ -669,6 +674,9 @@
 ;; First, there's a few combinators, that create program
 ;; fragments. Each instruction is of the form `(opcode arg*)`, and the
 ;; fragments are lists of instructions.
+
+(define (COMMENT c m)
+  (cons (append (car m) (list 'comment c)) (cdr m)))
 
 (define (SHALLOW-ASSIGNMENT! j m)
   (append m (SET-SHALLOW-ARGUMENT! j)))

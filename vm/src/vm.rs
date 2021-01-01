@@ -73,7 +73,7 @@ pub struct VM<'a> {
     halted: bool,
 
     // print a trace
-    trace: bool,
+    pub trace: bool,
 }
 
 fn make_predefined() -> Vec<ValueRef> {
@@ -240,6 +240,7 @@ impl VM<'_> {
             });
             print!("]");
         }
+        println!("[TRACE] == *pc* == {}", self.pc);
         print!("[TRACE] == stack == "); print_stack(&self.stack); println!();
         print!("[TRACE] == *val* == "); match &self.val {
             None => print!("#empty#"),
