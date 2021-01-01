@@ -232,22 +232,89 @@
             "Attempted to assign to immutable variable" n)))
         (compiler-error "Unknown variable" n))))
 
-;; Begin
+;; Begin. This is modified from the copypasta to account for internal
+;; definitions: the syntax (define ...) is valid at the beginning of a
+;; body. It is equivalent to a letrec collecting all the defined
+;; variables, so the treatment below builds the same structure as a
+;; letrec: allocate a frame, then assign all the definitions into it,
+;; before running the body.
 
 (define (meaning-sequence e+ r tail?)
-  (if (pair? e+)
-      (if (pair? (cdr e+))
-          (meaning*-multiple-sequence (car e+) (cdr e+) r tail?)
-          (meaning*-single-sequence (car e+) r tail?))
-      (compiler-error "Illegal form (begin)")))
 
-(define (meaning*-single-sequence e r tail?)
-  (meaning e r tail?))
+  (define (meaning-body e+ r tail?)
+    (if (pair? (cdr e+))
+        (meaning*-multiple-sequence (car e+) (cdr e+) r tail?)
+        (meaning*-single-sequence (car e+) r tail?)))
 
-(define (meaning*-multiple-sequence e e* r tail?)
-  (let ((m (meaning e r #f))
-        (m+ (meaning-sequence e* r tail?)))
-    (SEQUENCE m m+)))
+  (define (meaning-with-defs defs e+ r tail?)
+    ;; Accumulate the name and a meaning-generator for assigning each
+    ;; definition.
+    (let loop ((names '())
+               (sets '())
+               (defs (reverse defs)))
+      (if (pair? defs)
+          (let ((level (length names))
+                ;; ^ zero-based, but note the names end up in reverse
+                ;; order because cons; I'll restore order when they
+                ;; are used.
+                (d (cdar defs))) ;; drop the 'define
+            (if (pair? (car d))
+                ;; (define (f ...) ...)
+                (loop (cons (caar d) names)
+                      ;; the value of each variable closes over the
+                      ;; expanded environment, so they have to be
+                      ;; delayed until I have that latter.
+                      (cons (lambda (r2)
+                              (SHALLOW-ASSIGNMENT!
+                               level
+                               (meaning-abstraction (cdar d) (cdr d) r2 #f)))
+                            sets)
+                      (cdr defs))
+                ;; else (define a expr)
+                (if (or (null? (cdr d))
+                        (pair? (cddr d)))
+                    (compiler-error "Illegal syntax: expected single expression in form (define a expr)")
+                    (loop (cons (car d) names)
+                          (cons (lambda (r2)
+                                  (SHALLOW-ASSIGNMENT!
+                                   level
+                                   (meaning (cadr d) r2 #f)))
+                                sets)
+                          (cdr defs)))))
+          (let ((r2 (r-extend* r (reverse names)))) ;; re-reverse
+            (let loop ((m '())
+                       (ss (reverse sets)))
+              ;; ^ technically it doesn't matter which order these go
+              ;; in, but for easy reading, it's nice if they are in
+              ;; order of the names
+              (if (pair? ss)
+                  (loop (append m ((car ss) r2))
+                        (cdr ss))
+                  (let ((init (ALLOCATE-FRAME (length names)))
+                        (body (SEQUENCE m (meaning-body e+ r2 tail?))))
+                    (if tail?
+                        (TR-FIX-LET init body)
+                        (FIX-LET init body)))))))))
+
+  (define (meaning*-single-sequence e r tail?)
+    (meaning e r tail?))
+
+  (define (meaning*-multiple-sequence e e* r tail?)
+    (let ((m (meaning e r #f))
+          (m+ (meaning-body e* r tail?)))
+      (SEQUENCE m m+)))
+
+  (let loop ((defs '())
+             (body e+))
+    (if (pair? body)
+        (cond ((and (pair? (car body))
+                    (equal? (caar body) 'define))
+               (loop (cons (car body) defs) (cdr body)))
+              (else (if (null? defs)
+                        (meaning-body body r tail?)
+                        ;; some defs; extend the environment, and add setters
+                        (meaning-with-defs defs body r tail?))))
+        (compiler-error "Illegal form (begin)"))))
 
 ;; OK now the slightly harder bits. Starting with
 
@@ -343,7 +410,6 @@
     (if tail?
         (TR-FIX-LET m* m+)
         (FIX-LET m* m+))))
-
 ;; ((lambda as (apply + as)) 1 2 3)
 (define (meaning-dotted-closed-application n* n body e* r tail?)
   (let* ((m* (meaning-dotted* e* r (length e*) (length n*) #f))
@@ -431,6 +497,8 @@
 ;; env.ss (in the same place as above), and keeps a list of lists of
 ;; names.
 
+;; This creates a new lexical environment to introduce new bindings;
+;; e.g., in the body of a closure.
 (define (r-extend* r n*)
   (cons n* r))
 
