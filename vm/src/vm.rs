@@ -795,12 +795,21 @@ fn invoke_cons(vm: &mut VM) {
     vm.invoke2(prim_cons);
 }
 
+// eq? is supposed to test for the objects being the same, but it's
+// assumed that symbols are interned and {#t, #f, nil} are all
+// singletons, so I need a special case for those here.
 fn prim_eq_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
     // eq? is pointer equality
     if ValueRef::as_ptr(v1) == ValueRef::as_ptr(v2) {
         Ok(ValueRef::new(Value::Boolean(true)))
     } else {
-        Ok(ValueRef::new(Value::Boolean(false)))
+        let res = match (v1.deref(), v2.deref()) {
+            (Value::Symbol(s1), Value::Symbol(s2)) =>  s1 == s2,
+            (Value::Nil, Value::Nil) => true,
+            (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
+            _ => false
+        };
+        Ok(ValueRef::new(Value::Boolean(res)))
     }
 }
 fn invoke_eq_p(vm: &mut VM) {
@@ -813,6 +822,7 @@ fn prim_equal_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
             (Value::Nil, Value::Nil) => true,
             (Value::Int(i1), Value::Int(i2)) => i1 == i2,
             (Value::Symbol(s1), Value::Symbol(s2)) => s1 == s2,
+            (Value::String(s1), Value::String(s2)) => s1 == s2,
             (Value::Boolean(b1), Value::Boolean(b2)) => b1 == b2,
             (Value::Cons(hd1, tl1), Value::Cons(hd2, tl2)) => {
                 if eq(hd1, hd2) {
@@ -820,6 +830,12 @@ fn prim_equal_p(v1: &ValueRef, v2: &ValueRef) -> Result<ValueRef, String> {
                 } else {
                     false
                 }
+            },
+            (Value::Vector(v1), Value::Vector(v2)) => {
+                v1.len() == v2.len() &&
+                    v1.into_iter().zip(v2.into_iter()).all(
+                        |(a, b)| { eq(&*a.borrow(), &*b.borrow()) }
+                    )
             },
             _ => false
         }
@@ -1075,6 +1091,58 @@ mod tests {
     //     ./compiler.ss <<EOF
     //     ((lambda vargs vargs) 1 2 3)
     //     EOF
+
+    fn test_compare(prim: fn(&ValueRef, &ValueRef) -> Result<ValueRef, String>, v1: &ValueRef, v2: &ValueRef, expected: bool) {
+        let res = prim(&v1, &v2).expect("equals? should not error");
+        if let Value::Boolean(b) = res.deref() {
+            assert_eq!(*b, expected, "(equal? {:?} {:?})", v1.deref(), v2.deref());
+        } else {
+                assert!(false, "expected boolean result, got {:?}", res.deref());
+        }
+    }
+
+    #[test]
+    fn test_equal() {
+
+        fn test_eq(v1: ValueRef, v2: ValueRef) {
+            test_compare(prim_equal_p, &v1, &v2, true);
+        }
+        fn test_noteq(v1: ValueRef, v2: ValueRef) {
+            test_compare(prim_equal_p, &v1, &v2, false);
+        }
+
+        test_eq(ValueRef::new(Value::Int(2)), ValueRef::new(Value::Int(2)));
+        test_eq(ValueRef::new(Value::String("foobar".to_string())),
+                ValueRef::new(Value::String("foobar".to_string())));
+        test_eq(ValueRef::new(Value::Symbol("symmmmbol".to_string())),
+                ValueRef::new(Value::Symbol("symmmmbol".to_string())));
+        test_eq(mklist(vec![Value::Int(1), Value::String("barfoo".to_string())]),
+                mklist(vec![Value::Int(1), Value::String("barfoo".to_string())]));
+        test_eq(mkvec(vec![Value::Int(1), Value::String("barfoo".to_string())]),
+                mkvec(vec![Value::Int(1), Value::String("barfoo".to_string())]));
+
+        test_noteq(ValueRef::new(Value::Boolean(true)), ValueRef::new(Value::Boolean(false)));
+        test_noteq(mklist(vec![Value::Int(2), Value::String("foobar".to_string())]),
+                   mklist(vec![Value::Int(2), Value::String("foobar".to_string()), Value::Nil]));
+        test_noteq(mkvec(vec![Value::Symbol("boofar".to_string()), Value::Int(2)]),
+                   mkvec(vec![Value::Symbol("boofar".to_string()), Value::Int(3)]));
+    }
+
+    #[test]
+    fn test_eq_p() {
+        // the same pointer is eq?
+        let lst = mklist(vec![Value::Int(2), Value::Boolean(false)]);
+        test_compare(prim_eq_p, &lst, &lst, true);
+        // symbols with the same string are eq?
+        test_compare(prim_eq_p,
+                     &ValueRef::new(Value::Symbol(String::from("eq?"))),
+                     &ValueRef::new(Value::Symbol(String::from("eq?"))), true);
+
+        // lists and vectors are not eq?, even if their contents are eq?
+        test_compare(prim_eq_p,
+                     &mkvec(vec![Value::Symbol("notequal".to_string())]),
+                     &mkvec(vec![Value::Symbol("notequal".to_string())]), false);
+    }
 
     #[test]
     fn test_global_ref() {
@@ -1374,5 +1442,12 @@ mod tests {
             list = Value::Cons(ValueRef::new(v), ValueRef::new(list))
         }
         ValueRef::new(list)
+    }
+
+    fn mkvec(vals: Vec<Value>) -> ValueRef {
+        let vec: Vec<RefCell<ValueRef>> = vals.into_iter().map(|v| {
+            RefCell::new(ValueRef::new(v))
+        }).collect();
+        ValueRef::new(Value::Vector(vec))
     }
 }
