@@ -34,7 +34,7 @@ fn main() {
                     let mut vm = VM::new(program.constants, &mut code);
                     vm.trace = true;
                     let val = vm.run_until_halt();
-                                println!("{:#?}", val);
+                    eprintln!("{:?}", val);
                 },
                 Err(e) => println!("Compilation error: {}", e)
             }

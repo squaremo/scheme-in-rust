@@ -248,41 +248,40 @@ impl VM<'_> {
 
     fn print_trace(&self) {
         fn print_stack(stack: &Vec<StackEntry>) {
-            print!("[");
+            eprint!("[");
             stack.iter().for_each(|entry| {
                 match entry {
                     StackEntry::value(ref v) => {
                         let mut s = String::new();
                         write_value(v, &mut s);
-                        print!("{}, ", s);
+                        eprint!("{}, ", s);
                     },
                     StackEntry::frame(_) => {
-                        print!("frame, ");
+                        eprint!("frame, ");
                     },
                     StackEntry::return_address(pc) => {
-                        print!("return address {}, ", pc);
+                        eprint!("return address {}, ", pc);
                     },
                 }
             });
-            print!("]");
+            eprint!("]");
         }
-        println!("[TRACE] == *pc* == {}", self.pc);
-        print!("[TRACE] == stack == "); print_stack(&self.stack); println!();
-        print!("[TRACE] == *val* == "); match &self.val {
-            None => print!("#empty#"),
+        eprint!("[TRACE] == stack == "); print_stack(&self.stack); eprintln!();
+        eprint!("[TRACE] == *val* == "); match &self.val {
+            None => eprint!("#empty#"),
             Some(r) => {
                 match r {
                     ValReg::value(ref v) => {
                         let mut s = String::new();
                         write_value(v, &mut s);
-                        print!("{}", s);
+                        eprint!("{}", s);
                     },
                     ValReg::new_frame(_) => {
-                        print!("frame");
+                        eprint!("frame");
                     }
                 }
             }
-        }; println!();
+        }; eprintln!();
     }
 
     pub fn step(&mut self) {
@@ -290,7 +289,7 @@ impl VM<'_> {
         let instr = &self.code[self.pc];
 
         if self.trace {
-            println!("[TRACE] instr: {:?}, stack height: {}", instr, self.stack.len());
+            eprintln!("[TRACE] pc: {} instr: {:?}, stack height: {}", self.pc, instr, self.stack.len());
             self.print_trace();
         }
         self.pc += 1;
