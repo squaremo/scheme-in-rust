@@ -474,7 +474,9 @@
   (cond
    ((and (pair? e) (equal? 'define (car e)))
     (meaning-toplevel-definition (cadr e) (cddr e)))
-   (else (meaning e r.init #t))))
+   (else (meaning e r.init #f)))) ;; not a tail-call, because in
+                                  ;; general we want to return to
+                                  ;; processing the rest of the forms.
 
 (define (meaning-toplevel-definition n e*)
   (cond
@@ -483,13 +485,13 @@
                         (global-extend! (car n))))
            (level (cdr binding)))
       (COMMENT (list 'define (car n))
-               (GLOBAL-SET! level (meaning-abstraction (cdr n) e* r.init #t) ))))
+               (GLOBAL-SET! level (meaning-abstraction (cdr n) e* r.init #f) ))))
    (else
     (let* ((binding (or (global-variable? g.current n)
                         (global-extend! n)))
            (level (cdr binding)))
       (COMMENT (list 'define n)
-               (GLOBAL-SET! level (meaning (car e*) r.init #t)))))))
+               (GLOBAL-SET! level (meaning (car e*) r.init #f)))))))
 
 ;; ------- Backend
 
@@ -677,7 +679,7 @@
 ;; fragments. Each instruction is of the form `(opcode arg*)`, and the
 ;; fragments are lists of instructions.
 
-(define (COMMENT c m)
+(define (COMMENT c m) ;; (COMMENT '(define foo) ((instr ..) (instr ..)))
   (cons (append (car m) (list 'comment c)) (cdr m)))
 
 (define (SHALLOW-ASSIGNMENT! j m)
