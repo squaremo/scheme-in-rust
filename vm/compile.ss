@@ -41,7 +41,7 @@
         (body (cdr e*)))
     (if (pair? nn*)
         (let ((nn (car nn*)))
-          `(let ,(list nn) ,(expand-let* `(let* ,(cdr nn*) ,@body))))
+          `(let ,(list nn) (let* ,(cdr nn*) ,@body)))
         `(begin ,@body))))
 
 (define (expand-letrec e*)
