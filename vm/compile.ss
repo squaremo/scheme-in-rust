@@ -658,8 +658,10 @@
 ;; These are primitives that don't have an inlined implementation, so
 ;; go via the generic predefined lookup and regular application.
 (define-initial-generic*
-  'apply
-  'list)
+  'make-vector
+  'vector-length
+  'vector-ref
+  'vector-set!)
 
 ;; --- Combinators
 

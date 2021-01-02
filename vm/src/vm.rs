@@ -1,5 +1,6 @@
 use std::ops::Deref;
 use std::io;
+use std::cell::RefCell;
 
 use crate::instructions;
 use crate::instructions::{Opcode};
@@ -103,6 +104,10 @@ fn make_predefined() -> Vec<ValueRef> {
         Value::Native(NativeProc{name: ">=", func: invoke_gte}),
         Value::Native(NativeProc{name: "*", func: invoke_times}),
         Value::Native(NativeProc{name: "/", func: invoke_divide}),
+        Value::Native(NativeProc{name: "make-vector", func: invoke_make_vector}),
+        Value::Native(NativeProc{name: "vector-length", func: invoke_vector_length}),
+        Value::Native(NativeProc{name: "vector-ref", func: invoke_vector_ref}),
+        Value::Native(NativeProc{name: "vector-set!", func: invoke_vector_set}),
     ].into_iter().map(ValueRef::new).collect()
 }
 
@@ -209,6 +214,27 @@ impl VM<'_> {
         match result {
             Ok(result) => self.set_val(result),
             Err(e) => assert!(false, "INVOKE2: primitive returned error")
+        };
+    }
+
+    fn invoke3(&mut self, prim: fn(&ValueRef, &ValueRef, &ValueRef) -> Result<ValueRef, String>) {
+        let result =
+            if let Some(ValReg::new_frame(ref frame)) = self.val {
+                assert!(frame.args.len() == 4, "INVOKE3: frame does not have expected number of arguments");
+                let arg1 = frame.args[0].borrow();
+                let arg2 = frame.args[1].borrow();
+                let arg3 = frame.args[1].borrow();
+                if let (Some(ref v1), Some(ref v2), Some(ref v3)) = (&*arg1, &*arg2, &*arg3) {
+                    prim(v1, v2, v3)
+                } else {
+                    Err(String::from("INVOKE3: an argument is not initialised"))
+                }
+            } else {
+                Err(String::from("INVOKE3: value in val register is not a frame"))
+            };
+        match result {
+            Ok(result) => self.set_val(result),
+            Err(e) => assert!(false, "INVOKE3: primitive returned error")
         };
     }
 
@@ -892,6 +918,74 @@ fn invoke_read(_: &mut VM) {
     assert!(false, "not implemented")
 }
 
+fn integer_arg(arg: &ValueRef) -> Result<i64, String> {
+    if let Value::Int(ref i) = arg.deref() {
+        Ok(*i)
+    } else {
+        Err(format!("expected integer as argument, got {:?}", arg))
+    }
+}
+
+fn usize_arg(arg: &ValueRef) -> Result<usize, String> {
+    use std::convert::TryInto;
+    let i = integer_arg(arg)?;
+    i.try_into().map_err(|e| { format!("argument out of bounds for int: {}", e) })
+}
+
+fn vector_arg(arg: &ValueRef) -> Result<&Vec<RefCell<ValueRef>>, String> {
+    if let Value::Vector(v) = arg.deref() {
+        Ok(v)
+    } else {
+        Err(format!("expected vector as argument, got {:?}", arg))
+    }
+}
+
+fn builtin_make_vector(len: &ValueRef) -> Result<ValueRef, String> {
+    let i = usize_arg(len)?;
+    let v = Value::new_vector(i as usize);
+    Ok(ValueRef::new(v))
+}
+fn invoke_make_vector(vm: &mut VM) {
+    vm.invoke1(builtin_make_vector);
+}
+
+fn builtin_vector_length(vector: &ValueRef) -> Result<ValueRef, String> {
+    let v = vector_arg(vector)?;
+    Ok(ValueRef::new(Value::Int(v.len() as i64)))
+}
+fn invoke_vector_length(vm: &mut VM) {
+    vm.invoke1(builtin_vector_length);
+}
+
+fn builtin_vector_ref(vector: &ValueRef, index: &ValueRef) -> Result<ValueRef, String> {
+    let i = usize_arg(index)?;
+    let v = vector_arg(vector)?;
+    if i < 0 || i >= v.len() {
+        Err(format!("index out of bounds: {}", i))
+    } else {
+        let cell = v[i].borrow();
+        Ok(cell.clone())
+    }
+}
+fn invoke_vector_ref(vm: &mut VM) {
+    vm.invoke2(builtin_vector_ref);
+}
+
+fn builtin_vector_set(vector: &ValueRef, index: &ValueRef, val: &ValueRef) -> Result<ValueRef, String> {
+    let v = vector_arg(vector)?;
+    let i = usize_arg(index)?;
+    if i < 0 || i >= v.len() {
+        Err(format!("index out of bounds: {}", i))
+    } else {
+        let mut cell = v[i].borrow_mut();
+        *cell = val.clone();
+        Ok(ValueRef::new(Value::Undefined))
+    }
+}
+fn invoke_vector_set(vm: &mut VM) {
+    vm.invoke3(builtin_vector_set);
+}
+
 // If this used a global, or thread-local, for the output port, it
 // would be better implemented in Scheme. As it is, I need "native"
 // procedures with access to the registers anyway, so I can cheat
@@ -947,6 +1041,16 @@ fn write_value(v: &ValueRef, acc: &mut String) {
             }
         },
         Value::Nil => acc.push_str("'()"),
+        Value::Vector(v) => {
+            acc.push_str(&format!("#{}(", v.len()));
+            v.iter().enumerate().for_each(|(i, e)| {
+                write_value(&e.borrow(), acc);
+                if i < v.len() - 1 {
+                    acc.push(' ');
+                }
+            });
+            acc.push(')');
+        },
         Value::Closure(_, _) => acc.push_str("#<lambda>"),
         Value::Native(NativeProc{name, func: _}) => {
             acc.push_str("#<native procedure ");
@@ -1253,6 +1357,9 @@ mod tests {
         display(ValueRef::new(Value::Boolean(true)), "#t");
         display(ValueRef::new(Value::Boolean(false)), "#f");
         display(ValueRef::new(Value::Nil), "'()");
+        display(ValueRef::new(Value::Vector((1..10).map(|i| {
+            RefCell::new(ValueRef::new(Value::Int(i)))
+        }).collect())), "#9(1 2 3 4 5 6 7 8 9)");
         display(ValueRef::new(Value::Undefined), "#<undefined>");
         display(mklist(vec![
             Value::Int(0), Value::Boolean(false),

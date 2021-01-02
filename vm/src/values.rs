@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::fmt;
 use std::ptr;
+use std::cell::RefCell;
 
 use crate::frame::FrameRef;
 
@@ -44,9 +45,10 @@ pub enum Value {
     Symbol(String),
     Int(i64),
     String(String),
+    Boolean(bool),
     Cons(ValueRef, ValueRef), // allow improper lists
     Nil,
-    Boolean(bool),
+    Vector(Vec<RefCell<ValueRef>>),
     Closure(usize, FrameRef), // pc value and env
     Native(NativeProc),
     Undefined,
@@ -54,4 +56,10 @@ pub enum Value {
 
 impl Default for Value {
     fn default() -> Self { Value::Undefined }
+}
+
+impl Value {
+    pub fn new_vector(size: usize) -> Self {
+        Value::Vector(vec![RefCell::new(ValueRef::new(Value::Undefined)); size])
+    }
 }
